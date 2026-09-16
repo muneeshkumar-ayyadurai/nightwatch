@@ -117,8 +117,9 @@ function RegimesPage() {
               <span className="font-medium">1. Raw six</span>
               <span className="text-muted-foreground">
                 {" "}
-                — Hurst of the pair spread, India VIX, Nifty realized vs implied,
-                Nifty–Bank Nifty correlation, a CDS proxy, G-Sec slope proxy.
+                — Hurst of the pair spread, Nifty 20d−5d realized vol, Nifty
+                realized vs India VIX, Nifty–Bank Nifty correlation, USD/INR,
+                gilt 10y vs 5y ETFs. Credit and curve are not VIX clones.
               </span>
             </li>
             <li>

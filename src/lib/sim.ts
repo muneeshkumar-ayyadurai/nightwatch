@@ -145,6 +145,9 @@ export interface SimState {
   spreadStd: number;
   spreadBuf: number[];
   vix: number;
+  usdInr: number;
+  gilt5: number;
+  gilt10: number;
   signals: Signals;
   signalZ: Signals;
   scores: Record<RegimeId, number>;
@@ -481,6 +484,15 @@ function stepFactors(s: SimState) {
     9,
     42,
   );
+  const usdT = regime === "crisis" ? 98 : regime === "high_vol" ? 92 : 88;
+  s.usdInr = clamp(
+    s.usdInr + 0.12 * (usdT - s.usdInr) + gauss(s) * 0.12,
+    80,
+    110,
+  );
+  const gShock = regime === "crisis" ? -0.004 : 0.0002;
+  s.gilt5 = clamp(s.gilt5 * Math.exp(gShock * 0.5 + gauss(s) * 0.0015), 50, 80);
+  s.gilt10 = clamp(s.gilt10 * Math.exp(gShock + gauss(s) * 0.002), 22, 40);
   const lastN = s.niftyBuf[s.niftyBuf.length - 1] ?? 24800;
   const lastB = s.bankBuf[s.bankBuf.length - 1] ?? 55600;
   const vol = regime === "crisis" ? 0.012 : regime === "high_vol" ? 0.007 : 0.0035;
@@ -596,8 +608,14 @@ function applyNseBar(s: SimState, bar: NseBar) {
     vix: bar.vix,
     nifty: s.niftyBuf,
     bank: s.bankBuf,
+    usdInr: bar.usdInr,
+    gilt5: bar.gilt5,
+    gilt10: bar.gilt10,
   });
   s.vix = bar.vix;
+  s.usdInr = bar.usdInr;
+  s.gilt5 = bar.gilt5;
+  s.gilt10 = bar.gilt10;
   applyEngine(s, s.ts);
   s.latent = s.classified;
   s.hour += 1;
@@ -636,6 +654,9 @@ export function tick(state: SimState): SimState {
     vix: s.vix,
     nifty: s.niftyBuf,
     bank: s.bankBuf,
+    usdInr: s.usdInr,
+    gilt5: s.gilt5,
+    gilt10: s.gilt10,
   });
   s.hour += 1;
   s.ts = advanceNseTs(s.ts);
@@ -671,6 +692,9 @@ export function createInitialState(
     spreadStd: 0.01,
     spreadBuf: [],
     vix: 13.2,
+    usdInr: 88,
+    gilt5: 64,
+    gilt10: 29.4,
     signals: emptySignals(),
     signalZ: emptySignals(),
     scores: emptyScores(),
@@ -790,17 +814,17 @@ export const SIGNAL_META: {
   },
   {
     key: "vixTerm",
-    label: "India VIX term",
-    unit: "pts",
-    hint: "Calm India VIX sits in contango. Spikes look like backwardation.",
+    label: "Nifty RV term 20d−5d",
+    unit: "vol",
+    hint: "Realized vol term structure on Nifty. Positive = calm (20d > 5d). Not a VIX clone.",
     format: (v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)),
     goodHigh: true,
   },
   {
     key: "rvIv",
-    label: "Realized vs implied",
+    label: "Nifty RV vs India VIX",
     unit: "vol",
-    hint: "Nifty realized minus India VIX. Positive = vol underpriced, risk-off.",
+    hint: "20d Nifty realized minus India VIX. Positive = vol underpriced.",
     format: (v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)),
     goodHigh: false,
   },
@@ -814,18 +838,18 @@ export const SIGNAL_META: {
   },
   {
     key: "credit",
-    label: "India 5y CDS",
-    unit: "bps",
-    hint: "Sovereign stress proxy. Widens before the cash book finishes falling.",
-    format: (v) => `${Math.round(v)}`,
+    label: "USD/INR",
+    unit: "INR",
+    hint: "Spot USDINR. Independent of VIX. Rupee weakness is the external/credit print.",
+    format: (v) => v.toFixed(2),
     goodHigh: false,
   },
   {
     key: "curve",
-    label: "G-Sec 10y–2y",
-    unit: "%",
-    hint: "Indian curve. Inversion leans risk-off; steepening leans growth.",
-    format: (v) => `${v.toFixed(2)}`,
+    label: "Gilt 10y vs 5y ETF",
+    unit: "log",
+    hint: "log(LTGILTBEES) − log(GILT5YBEES). Long gilt dumped = curve stress. Not a VIX transform.",
+    format: (v) => v.toFixed(3),
     goodHigh: true,
   },
 ];

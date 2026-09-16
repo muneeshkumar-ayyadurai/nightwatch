@@ -1,3 +1,5 @@
+import type { ValidationReport } from "./validate-ou.ts";
+
 export interface NseLeg {
   symbol: string;
   yahoo: string;
@@ -84,6 +86,9 @@ export interface NseBar {
   vix: number;
   nifty: number;
   bank: number;
+  usdInr: number;
+  gilt5: number;
+  gilt10: number;
 }
 
 export interface NseTape {
@@ -100,6 +105,8 @@ export interface NseTape {
     curve: number;
   }[];
   lastDay?: string;
+  daily?: NseBar[];
+  validation?: ValidationReport;
 }
 
 export function advanceNseTs(ts: number): number {
@@ -189,18 +196,23 @@ export function rollingCorr(a: number[], b: number[]): number {
   return Math.max(0.05, Math.min(0.99, num / den));
 }
 
-export function realizedVol(px: number[]): number {
-  if (px.length < 8) return 0.12;
+export function realizedVol(
+  px: number[],
+  barsPerYear: number,
+  lookback?: number,
+): number {
+  const xs = lookback && px.length > lookback ? px.slice(-lookback) : px;
+  if (xs.length < 6) return 0.12;
   const rets: number[] = [];
-  for (let i = 1; i < px.length; i++) {
-    if (px[i] && px[i - 1]) rets.push(Math.log(px[i]! / px[i - 1]!));
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] && xs[i - 1]) rets.push(Math.log(xs[i]! / xs[i - 1]!));
   }
   if (rets.length < 4) return 0.12;
   const m = rets.reduce((a, b) => a + b, 0) / rets.length;
   let v = 0;
   for (const r of rets) v += (r - m) ** 2;
   const std = Math.sqrt(v / (rets.length - 1));
-  return std * Math.sqrt(SESSION_HOURS * 252);
+  return std * Math.sqrt(barsPerYear);
 }
 
 export function signalsFromNse(args: {
@@ -208,6 +220,10 @@ export function signalsFromNse(args: {
   vix: number;
   nifty: number[];
   bank: number[];
+  usdInr?: number;
+  gilt5?: number;
+  gilt10?: number;
+  barHours?: number;
 }): {
   hurst: number;
   vixTerm: number;
@@ -216,16 +232,23 @@ export function signalsFromNse(args: {
   credit: number;
   curve: number;
 } {
+  const hours = args.barHours ?? SESSION_HOURS;
+  const bpy = hours <= 1 ? 252 : 252 * SESSION_HOURS;
+  const dayBars = hours <= 1 ? 1 : SESSION_HOURS;
   const hurst = hurstRough(args.spreadBuf);
   const vix = args.vix || 13.2;
-  const rv = realizedVol(args.nifty);
+  const rv20 = realizedVol(args.nifty, bpy, 20 * dayBars);
+  const rv5 = realizedVol(args.nifty, bpy, 5 * dayBars);
   const iv = vix / 100;
+  const usd = args.usdInr ?? 88;
+  const g5 = Math.max(1e-6, args.gilt5 ?? 64);
+  const g10 = Math.max(1e-6, args.gilt10 ?? 29.4);
   return {
     hurst,
-    vixTerm: (14.8 - vix) / 6,
-    rvIv: rv - iv,
+    vixTerm: rv20 - rv5,
+    rvIv: rv20 - iv,
     correlation: rollingCorr(args.nifty, args.bank),
-    credit: 40 + vix * 7,
-    curve: 0.52 - (vix - 13) * 0.07,
+    credit: usd,
+    curve: Math.log(g10) - Math.log(g5),
   };
 }

@@ -37,20 +37,20 @@ export const WINDOW_DAYS = 90;
 /** India 2019–2024 cash-session prior. Used as the missing days in the 90-day window. */
 export const INDIA_PRIOR_MEAN: Signals = {
   hurst: 0.43,
-  vixTerm: 0.38,
+  vixTerm: 0.01,
   rvIv: -0.06,
   correlation: 0.7,
-  credit: 94,
-  curve: 0.36,
+  credit: 88,
+  curve: -0.78,
 };
 
 export const INDIA_PRIOR_STD: Signals = {
   hurst: 0.07,
-  vixTerm: 0.48,
+  vixTerm: 0.05,
   rvIv: 0.2,
   correlation: 0.11,
-  credit: 30,
-  curve: 0.24,
+  credit: 5,
+  curve: 0.04,
 };
 
 const HOME: Signals = { ...INDIA_PRIOR_MEAN };

@@ -42,11 +42,11 @@ describe("regime-engine 90-day z-score", () => {
   it("classifies a credit/corr/VIX spike as crisis", () => {
     const snap = run({
       hurst: 0.57,
-      vixTerm: -1.25,
+      vixTerm: -0.18,
       rvIv: 0.85,
       correlation: 0.95,
-      credit: 230,
-      curve: -0.55,
+      credit: 104,
+      curve: -0.94,
     });
     assert.equal(snap.regime, "crisis");
     assert.ok(snap.scores.crisis > snap.scores.mean_reverting);
@@ -63,10 +63,10 @@ describe("regime-engine 90-day z-score", () => {
   it("classifies realized-over-implied as high vol", () => {
     const snap = run({
       hurst: 0.48,
-      vixTerm: -0.35,
+      vixTerm: -0.12,
       rvIv: 0.72,
       correlation: 0.74,
-      credit: 120,
+      credit: 90,
     });
     assert.equal(snap.regime, "high_vol");
     assert.ok(snap.z.rvIv > 2);

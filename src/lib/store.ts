@@ -9,9 +9,11 @@ import {
   type RegimeId,
   type SimState,
 } from "@/lib/sim";
+import type { ValidationReport } from "@/lib/validate-ou";
 
 interface SimStore extends SimState {
   feedStatus: "sim" | "loading" | "nse";
+  validation: ValidationReport | null;
   step: () => void;
   setRunning: (running: boolean) => void;
   setSpeed: (speed: number) => void;
@@ -34,6 +36,7 @@ interface SimStore extends SimState {
 export const useSim = create<SimStore>((set, get) => ({
   ...createInitialState(),
   feedStatus: "loading",
+  validation: null,
   step: () => set(tick(get())),
   setRunning: (running) => set({ running }),
   setSpeed: (speed) => set({ speed }),
@@ -49,6 +52,7 @@ export const useSim = create<SimStore>((set, get) => ({
     set({
       ...createInitialState(prev.seed, pairId),
       feedStatus: "loading",
+      validation: null,
       mode: prev.mode,
       speed: prev.speed,
       kellyBlend: prev.kellyBlend,
@@ -74,6 +78,7 @@ export const useSim = create<SimStore>((set, get) => ({
       autoFlattenCrisis: prev.autoFlattenCrisis,
       killed: false,
       killReason: null,
+      validation: tape.validation ?? null,
     });
   },
   appendFeed: (tape) => {
@@ -103,6 +108,7 @@ export const useSim = create<SimStore>((set, get) => ({
     set({
       ...createInitialState((prev.seed + 41) | 0, prev.pairId || DEFAULT_PAIR_ID),
       feedStatus: "loading",
+      validation: null,
       mode: prev.mode,
       speed: prev.speed,
       kellyBlend: prev.kellyBlend,

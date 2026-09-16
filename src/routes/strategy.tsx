@@ -14,6 +14,7 @@ import { pairOf } from "@/lib/nse";
 import { inr } from "@/lib/format";
 import { useSim } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import type { BookReport, ValidationReport } from "@/lib/validate-ou";
 
 export const Route = createFileRoute("/strategy")({ component: StrategyPage });
 
@@ -131,6 +132,8 @@ function StrategyPage() {
           </Panel>
         </div>
 
+        <ValidationPanel />
+
         <Panel title="Recent fills — regime book">
           {filtered.trades.length === 0 ? (
             <p className="text-sm text-muted-foreground">No closed trades yet.</p>
@@ -180,6 +183,118 @@ function StrategyPage() {
         </Panel>
       </div>
     </AppShell>
+  );
+}
+
+function istDate(ts: number) {
+  return new Date(ts * 1000).toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function fmtSharpe(n: number | null) {
+  return n == null ? "—" : n.toFixed(2);
+}
+
+function fmtPct(n: number) {
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function BookCells({ b }: { b: BookReport }) {
+  return (
+    <>
+      <td className="py-2 text-right">
+        <PnL n={b.pnl} />
+      </td>
+      <td className="py-2 text-right font-mono tabular-nums">{fmtSharpe(b.sharpe)}</td>
+      <td className="py-2 text-right font-mono tabular-nums">{fmtPct(b.maxDd)}</td>
+      <td className="py-2 text-right font-mono tabular-nums">{b.trades}</td>
+      <td className="py-2 text-right font-mono tabular-nums">
+        {b.winRate == null ? "—" : fmtPct(b.winRate)}
+      </td>
+      <td className="py-2 text-right font-mono tabular-nums">{fmtPct(b.timeIn)}</td>
+    </>
+  );
+}
+
+function ValidationPanel() {
+  const v = useSim((s) => s.validation);
+  const feed = useSim((s) => s.feedStatus);
+  return (
+    <Panel title="Walk-forward · NSE daily tape">
+      {!v ? (
+        <p className="text-sm text-muted-foreground">
+          {feed === "loading"
+            ? "Fetching a 1-year daily tape (pair, India VIX, Nifty, Bank Nifty, USD/INR, gilt ETFs)."
+            : "No 1-year daily tape on this pair yet. Live desk is paper-forward only."}
+        </p>
+      ) : (
+        <ValidationBody v={v} />
+      )}
+    </Panel>
+  );
+}
+
+function ValidationBody({ v }: { v: ValidationReport }) {
+  const flags = [
+    ["India VIX", v.series.vix],
+    ["USD/INR", v.series.usdInr],
+    ["Gilt ETFs", v.series.gilt],
+    ["Nifty", v.series.nifty],
+  ] as const;
+  return (
+    <>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        Warmup {v.warmup} sessions, then {v.oos} out-of-sample days from{" "}
+        {istDate(v.from)} to {istDate(v.to)}. Same OU rules as the live book.
+        Engine sees only data ≤ t. Yahoo delayed, not a broker tape.
+      </p>
+      <ul className="mt-3 flex flex-wrap gap-2 text-xs">
+        {flags.map(([label, ok]) => (
+          <li
+            key={label}
+            className={cn(
+              "rounded-md px-2 py-1",
+              ok ? "bg-secondary text-foreground" : "bg-secondary text-muted-foreground",
+            )}
+          >
+            {label} {ok ? "live" : "flat/missing"}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="pb-2 font-medium">Book</th>
+              <th className="pb-2 text-right font-medium">P&L</th>
+              <th className="pb-2 text-right font-medium">Sharpe</th>
+              <th className="pb-2 text-right font-medium">Max DD</th>
+              <th className="pb-2 text-right font-medium">Trades</th>
+              <th className="pb-2 text-right font-medium">Win</th>
+              <th className="pb-2 text-right font-medium">Time in</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-t border-border">
+              <td className="py-2">Regime-gated OU</td>
+              <BookCells b={v.filtered} />
+            </tr>
+            <tr className="border-t border-border">
+              <td className="py-2 text-muted-foreground">Always-on OU</td>
+              <BookCells b={v.naive} />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Gate edge <PnL n={v.edge} /> vs always-on. Last classified{" "}
+        {v.lastRegime.replace("_", "-")} · window {v.engineN}/90.
+      </p>
+    </>
   );
 }
 
