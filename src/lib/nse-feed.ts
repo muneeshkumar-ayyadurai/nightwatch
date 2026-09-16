@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
   DEFAULT_PAIR_ID,
+  dataIntegrity,
   pairOf,
   signalsFromNse,
   type NseBar,
@@ -89,8 +90,8 @@ function nearest(series: Series[], t: number, window = 3600): number | null {
   return best ? best.c : null;
 }
 
-function carry(series: Series[], t: number, window: number, fallback: number) {
-  return nearest(series, t, window) ?? fallback;
+function lastSeen(series: Series[], t: number, window: number, prev: number | null) {
+  return nearest(series, t, window) ?? prev;
 }
 
 function align(
@@ -105,22 +106,22 @@ function align(
   window = 1800,
 ): NseBar[] {
   const bars: NseBar[] = [];
-  let lastVix = vix[0]?.c ?? 13.2;
-  let lastN = nifty[0]?.c ?? 23000;
-  let lastB = bank[0]?.c ?? 55000;
-  let lastUsd = usd[0]?.c ?? 88;
-  let lastG5 = gilt5[0]?.c ?? 64;
-  let lastG10 = gilt10[0]?.c ?? 29.4;
+  let lastVix: number | null = null;
+  let lastN: number | null = null;
+  let lastB: number | null = null;
+  let lastUsd: number | null = null;
+  let lastG5: number | null = null;
+  let lastG10: number | null = null;
   const wide = Math.max(window, 36 * 3600);
   for (const row of a) {
     const pxB = nearest(b, row.t, window);
     if (pxB == null) continue;
-    lastVix = carry(vix, row.t, wide, lastVix);
-    lastN = carry(nifty, row.t, window, lastN);
-    lastB = carry(bank, row.t, window, lastB);
-    lastUsd = carry(usd, row.t, wide, lastUsd);
-    lastG5 = carry(gilt5, row.t, wide, lastG5);
-    lastG10 = carry(gilt10, row.t, wide, lastG10);
+    lastVix = lastSeen(vix, row.t, wide, lastVix);
+    lastN = lastSeen(nifty, row.t, window, lastN);
+    lastB = lastSeen(bank, row.t, window, lastB);
+    lastUsd = lastSeen(usd, row.t, wide, lastUsd);
+    lastG5 = lastSeen(gilt5, row.t, wide, lastG5);
+    lastG10 = lastSeen(gilt10, row.t, wide, lastG10);
     bars.push({
       t: row.t,
       a: row.c,
@@ -143,24 +144,22 @@ function history90FromDaily(bars: NseBar[]): Signals[] {
   const out: Signals[] = [];
   for (const bar of bars) {
     spreadBuf.push(Math.log(bar.a) - Math.log(bar.b));
-    niftyBuf.push(bar.nifty);
-    bankBuf.push(bar.bank);
+    if (bar.nifty != null) niftyBuf.push(bar.nifty);
+    if (bar.bank != null) bankBuf.push(bar.bank);
     if (spreadBuf.length > 90) spreadBuf.shift();
     if (niftyBuf.length > 90) niftyBuf.shift();
     if (bankBuf.length > 90) bankBuf.shift();
-    if (spreadBuf.length < 20) continue;
-    out.push(
-      signalsFromNse({
-        spreadBuf,
-        vix: bar.vix,
-        nifty: niftyBuf,
-        bank: bankBuf,
-        usdInr: bar.usdInr,
-        gilt5: bar.gilt5,
-        gilt10: bar.gilt10,
-        barHours: 1,
-      }),
-    );
+    const sig = signalsFromNse({
+      spreadBuf,
+      vix: bar.vix,
+      nifty: niftyBuf,
+      bank: bankBuf,
+      usdInr: bar.usdInr,
+      gilt5: bar.gilt5,
+      gilt10: bar.gilt10,
+      barHours: 1,
+    });
+    if (sig) out.push(sig);
   }
   return out.slice(-90);
 }
@@ -190,7 +189,19 @@ export const fetchNseTape = createServerFn({ method: "POST" })
         ]);
 
       const hourlyP = pack("1h", "1mo");
-      const dailyP = settle(pack("1d", "1y"), 8000);
+      const dailyP = settle(
+        Promise.all([
+          yahoo(pair.a.yahoo, "1d", "2y"),
+          yahoo(pair.b.yahoo, "1d", "2y"),
+          yahooSoft("^INDIAVIX", "1d", "2y"),
+          yahooSoft("^NSEI", "1d", "2y"),
+          yahooSoft("^NSEBANK", "1d", "2y"),
+          yahooSoft("INR=X", "1d", "2y"),
+          yahooSoft("GILT5YBEES.NS", "1d", "2y"),
+          yahooSoft("LTGILTBEES.NS", "1d", "2y"),
+        ]),
+        12000,
+      );
       const [hourly, daily] = await Promise.all([hourlyP, dailyP]);
       const [a, b, vix, nifty, bank, usd, g5, g10] = hourly;
       const bars = align(a, b, vix, nifty, bank, usd, g5, g10);
@@ -201,7 +212,17 @@ export const fetchNseTape = createServerFn({ method: "POST" })
       let validation: ValidationReport | null = null;
       if (daily) {
         const [da, db, dv, dn, dnk, dusd, dg5, dg10] = daily;
-        dailyBars = align(da, db, dv, dn, dnk, dusd ?? EMPTY, dg5 ?? EMPTY, dg10 ?? EMPTY, 36 * 3600);
+        dailyBars = align(
+          da,
+          db,
+          dv ?? EMPTY,
+          dn ?? EMPTY,
+          dnk ?? EMPTY,
+          dusd ?? EMPTY,
+          dg5 ?? EMPTY,
+          dg10 ?? EMPTY,
+          36 * 3600,
+        );
         history90 = history90FromDaily(dailyBars);
         validation = validateOu(dailyBars, pair.id);
       }
@@ -215,6 +236,7 @@ export const fetchNseTape = createServerFn({ method: "POST" })
         history90,
         lastDay: istDayKey(last.t * 1000),
         daily: dailyBars,
+        integrity: dataIntegrity(dailyBars.length ? dailyBars : bars),
         validation: validation ?? undefined,
       };
       cache.set(pair.id, { at: Date.now(), tape });

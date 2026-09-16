@@ -135,7 +135,7 @@ function RegimesPage() {
               <span className="font-medium">3. Loadings</span>
               <span className="text-muted-foreground">
                 {" "}
-                — four score vectors. Crisis loads on wide credit, high
+                — four score vectors. Crisis loads on USD/INR, high
                 correlation, inverted vol. Trend loads on Hurst. Mean-rev is the
                 home bias when z is quiet.
               </span>

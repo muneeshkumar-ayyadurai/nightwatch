@@ -11,7 +11,7 @@ export type SignalKey =
   | "vixTerm"
   | "rvIv"
   | "correlation"
-  | "credit"
+  | "usdInr"
   | "curve";
 
 export interface Signals {
@@ -19,7 +19,7 @@ export interface Signals {
   vixTerm: number;
   rvIv: number;
   correlation: number;
-  credit: number;
+  usdInr: number;
   curve: number;
 }
 
@@ -28,7 +28,7 @@ export const SIGNAL_KEYS: SignalKey[] = [
   "vixTerm",
   "rvIv",
   "correlation",
-  "credit",
+  "usdInr",
   "curve",
 ];
 
@@ -40,7 +40,7 @@ export const INDIA_PRIOR_MEAN: Signals = {
   vixTerm: 0.01,
   rvIv: -0.06,
   correlation: 0.7,
-  credit: 88,
+  usdInr: 88,
   curve: -0.78,
 };
 
@@ -49,7 +49,7 @@ export const INDIA_PRIOR_STD: Signals = {
   vixTerm: 0.05,
   rvIv: 0.2,
   correlation: 0.11,
-  credit: 5,
+  usdInr: 5,
   curve: 0.04,
 };
 
@@ -62,7 +62,7 @@ export const LOADINGS: Record<RegimeId, Signals> = {
     vixTerm: 0.55,
     rvIv: -0.55,
     correlation: -0.65,
-    credit: -0.4,
+    usdInr: -0.4,
     curve: 0.35,
   },
   trending: {
@@ -70,7 +70,7 @@ export const LOADINGS: Record<RegimeId, Signals> = {
     vixTerm: 0.1,
     rvIv: -0.25,
     correlation: 0.1,
-    credit: -0.15,
+    usdInr: -0.15,
     curve: 0.2,
   },
   high_vol: {
@@ -78,7 +78,7 @@ export const LOADINGS: Record<RegimeId, Signals> = {
     vixTerm: -0.85,
     rvIv: 1.35,
     correlation: 0.35,
-    credit: 0.25,
+    usdInr: 0.25,
     curve: -0.2,
   },
   crisis: {
@@ -86,7 +86,7 @@ export const LOADINGS: Record<RegimeId, Signals> = {
     vixTerm: -1.05,
     rvIv: 0.7,
     correlation: 1.05,
-    credit: 1.2,
+    usdInr: 1.2,
     curve: -0.9,
   },
 };

@@ -39,18 +39,18 @@ describe("regime-engine 90-day z-score", () => {
     }
   });
 
-  it("classifies a credit/corr/VIX spike as crisis", () => {
+  it("classifies a usdInr/corr/VIX spike as crisis", () => {
     const snap = run({
       hurst: 0.57,
       vixTerm: -0.18,
       rvIv: 0.85,
       correlation: 0.95,
-      credit: 104,
+      usdInr: 104,
       curve: -0.94,
     });
     assert.equal(snap.regime, "crisis");
     assert.ok(snap.scores.crisis > snap.scores.mean_reverting);
-    assert.ok(snap.z.credit > 2);
+    assert.ok(snap.z.usdInr > 2);
     assert.ok(snap.z.vixTerm < -2);
   });
 
@@ -66,7 +66,7 @@ describe("regime-engine 90-day z-score", () => {
       vixTerm: -0.12,
       rvIv: 0.72,
       correlation: 0.74,
-      credit: 90,
+      usdInr: 90,
     });
     assert.equal(snap.regime, "high_vol");
     assert.ok(snap.z.rvIv > 2);
@@ -82,10 +82,10 @@ describe("regime-engine 90-day z-score", () => {
 
   it("replaces the same IST day instead of growing the window", () => {
     let engine = createEngine();
-    engine = observe(engine, raw({ credit: 90 }), T0).engine;
-    engine = observe(engine, raw({ credit: 140 }), T0 + 3_600_000).engine;
+    engine = observe(engine, raw({ usdInr: 90 }), T0).engine;
+    engine = observe(engine, raw({ usdInr: 140 }), T0 + 3_600_000).engine;
     assert.equal(engine.days.length, 1);
-    assert.equal(engine.days[0]?.credit, 140);
+    assert.equal(engine.days[0]?.usdInr, 140);
   });
 
   it("hysteresis does not flip on a one-tick wiggle", () => {

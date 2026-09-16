@@ -9,12 +9,14 @@ import {
   Z_EXIT,
   Z_STOP,
   equityOf,
+  REGIME_META,
+  REGIME_ORDER,
 } from "@/lib/sim";
 import { pairOf } from "@/lib/nse";
 import { inr } from "@/lib/format";
 import { useSim } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { BookReport, ValidationReport } from "@/lib/validate-ou";
+import type { BookStats, ValidationReport } from "@/lib/validate-ou";
 
 export const Route = createFileRoute("/strategy")({ component: StrategyPage });
 
@@ -48,6 +50,7 @@ function StrategyPage() {
   const pair = pairOf(pairId);
   const pos = filtered.position;
   const eq = equityOf(filtered, ko, pep);
+  const ouFit = useSim((s) => s.ouFit);
 
   return (
     <AppShell>
@@ -103,7 +106,8 @@ function StrategyPage() {
             <PairChart data={history} a={pair.a.symbol} b={pair.b.symbol} />
             <div className="mt-4">
               <p className="mb-2 text-xs text-muted-foreground">
-                z-score of log({pair.a.symbol}) − log({pair.b.symbol})
+                z-score of the OU residual log({pair.a.symbol}) − α − β log(
+                {pair.b.symbol})
               </p>
               <ZChart data={history} />
             </div>
@@ -114,7 +118,12 @@ function StrategyPage() {
               <Row k="Exit" v={`|z| < ${Z_EXIT}`} />
               <Row k="Stop" v={`|z| > ${Z_STOP}`} />
               <Row k="Time stop" v={`${MAX_HOLD_HOURS}h`} />
-              <Row k="Hedge" v="Dollar-neutral" />
+              <Row k="Hedge" v={ouFit ? `β ${ouFit.beta.toFixed(2)} log` : "unfitted"} />
+              <Row
+                k="Half-life"
+                v={ouFit ? `${ouFit.halfLife.toFixed(1)}d` : "—"}
+              />
+              <Row k="Hedge R²" v={ouFit ? ouFit.r2.toFixed(2) : "—"} />
               <Row
                 k="Regime gate"
                 v={filterOn ? "Mean-rev only" : "Off"}
@@ -203,7 +212,7 @@ function fmtPct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
-function BookCells({ b }: { b: BookReport }) {
+function BookCells({ b }: { b: BookStats }) {
   return (
     <>
       <td className="py-2 text-right">
@@ -228,8 +237,8 @@ function ValidationPanel() {
       {!v ? (
         <p className="text-sm text-muted-foreground">
           {feed === "loading"
-            ? "Fetching a 1-year daily tape (pair, India VIX, Nifty, Bank Nifty, USD/INR, gilt ETFs)."
-            : "No 1-year daily tape on this pair yet. Live desk is paper-forward only."}
+            ? "Fetching a 2-year daily tape (pair, India VIX, Nifty, Bank Nifty, USD/INR, gilt ETFs)."
+            : "No daily tape on this pair yet. Live desk is paper-forward only."}
         </p>
       ) : (
         <ValidationBody v={v} />
@@ -240,17 +249,25 @@ function ValidationPanel() {
 
 function ValidationBody({ v }: { v: ValidationReport }) {
   const flags = [
-    ["India VIX", v.series.vix],
-    ["USD/INR", v.series.usdInr],
-    ["Gilt ETFs", v.series.gilt],
-    ["Nifty", v.series.nifty],
+    ["Pair", v.integrity.pair.ok],
+    ["India VIX", v.integrity.vix.ok],
+    ["Nifty", v.integrity.nifty.ok],
+    ["Bank Nifty", v.integrity.bank.ok],
+    ["USD/INR", v.integrity.usdInr.ok],
+    ["Gilt ETFs", v.integrity.gilt.ok],
   ] as const;
   return (
     <>
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Warmup {v.warmup} sessions, then {v.oos} out-of-sample days from{" "}
-        {istDate(v.from)} to {istDate(v.to)}. Same OU rules as the live book.
-        Engine sees only data ≤ t. Yahoo delayed, not a broker tape.
+        {v.status === "invalid" ? (
+          <>INVALID. {v.reason}. No dummy macros, no backtest.</>
+        ) : (
+          <>
+            Train 6m / validate 3m / OOS 3m, rolled. OU (β, κ, θ, σ) frozen at
+            train end. {v.selectedFolds} selected fold
+            {v.selectedFolds === 1 ? "" : "s"} of {v.folds.length}. Yahoo delayed.
+          </>
+        )}
       </p>
       <ul className="mt-3 flex flex-wrap gap-2 text-xs">
         {flags.map(([label, ok]) => (
@@ -261,39 +278,120 @@ function ValidationBody({ v }: { v: ValidationReport }) {
               ok ? "bg-secondary text-foreground" : "bg-secondary text-muted-foreground",
             )}
           >
-            {label} {ok ? "live" : "flat/missing"}
+            {label} {ok ? "live" : "missing"}
           </li>
         ))}
       </ul>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="text-xs text-muted-foreground">
-            <tr>
-              <th className="pb-2 font-medium">Book</th>
-              <th className="pb-2 text-right font-medium">P&L</th>
-              <th className="pb-2 text-right font-medium">Sharpe</th>
-              <th className="pb-2 text-right font-medium">Max DD</th>
-              <th className="pb-2 text-right font-medium">Trades</th>
-              <th className="pb-2 text-right font-medium">Win</th>
-              <th className="pb-2 text-right font-medium">Time in</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-t border-border">
-              <td className="py-2">Regime-gated OU</td>
-              <BookCells b={v.filtered} />
-            </tr>
-            <tr className="border-t border-border">
-              <td className="py-2 text-muted-foreground">Always-on OU</td>
-              <BookCells b={v.naive} />
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        Gate edge <PnL n={v.edge} /> vs always-on. Last classified{" "}
-        {v.lastRegime.replace("_", "-")} · window {v.engineN}/90.
-      </p>
+      {v.lastFit ? (
+        <dl className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+          <Row k="β" v={v.lastFit.beta.toFixed(3)} />
+          <Row k="Half-life" v={`${v.lastFit.halfLife.toFixed(1)}d`} />
+          <Row k="κ" v={v.lastFit.kappa.toFixed(1)} />
+          <Row k="R²" v={v.lastFit.r2.toFixed(2)} />
+        </dl>
+      ) : null}
+      {v.folds.length > 0 ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="pb-2 font-medium">Fold</th>
+                <th className="pb-2 font-medium">Train → OOS</th>
+                <th className="pb-2 font-medium">Select</th>
+                <th className="pb-2 text-right font-medium">OOS gated</th>
+                <th className="pb-2 text-right font-medium">OOS naive</th>
+              </tr>
+            </thead>
+            <tbody>
+              {v.folds.map((f) => (
+                <tr key={f.i} className="border-t border-border">
+                  <td className="py-2 font-mono tabular-nums">{f.i}</td>
+                  <td className="py-2 text-xs text-muted-foreground">
+                    {istDate(f.trainFrom)} → {istDate(f.oosTo)}
+                  </td>
+                  <td className="py-2 text-xs">
+                    {f.selected ? "yes" : f.reason}
+                  </td>
+                  <td className="py-2 text-right">
+                    <PnL n={f.oos.filtered.pnl} />
+                  </td>
+                  <td className="py-2 text-right">
+                    <PnL n={f.oos.naive.pnl} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {v.pooled ? (
+        <>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="pb-2 font-medium">Pooled OOS</th>
+                  <th className="pb-2 text-right font-medium">P&L</th>
+                  <th className="pb-2 text-right font-medium">Sharpe</th>
+                  <th className="pb-2 text-right font-medium">Max DD</th>
+                  <th className="pb-2 text-right font-medium">Trades</th>
+                  <th className="pb-2 text-right font-medium">Win</th>
+                  <th className="pb-2 text-right font-medium">Time in</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-border">
+                  <td className="py-2">Regime-gated OU</td>
+                  <BookCells b={v.pooled.filtered} />
+                </tr>
+                <tr className="border-t border-border">
+                  <td className="py-2 text-muted-foreground">Always-on OU</td>
+                  <BookCells b={v.pooled.naive} />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="pb-2 font-medium">Regime (OOS)</th>
+                  <th className="pb-2 text-right font-medium">Gated P&L</th>
+                  <th className="pb-2 text-right font-medium">Naive P&L</th>
+                  <th className="pb-2 text-right font-medium">Gated n</th>
+                  <th className="pb-2 text-right font-medium">Naive n</th>
+                </tr>
+              </thead>
+              <tbody>
+                {REGIME_ORDER.map((id) => {
+                  const sl = v.pooled!.byRegime[id];
+                  return (
+                    <tr key={id} className="border-t border-border">
+                      <td className="py-2">{REGIME_META[id].label}</td>
+                      <td className="py-2 text-right">
+                        <PnL n={sl.filtered.pnl} />
+                      </td>
+                      <td className="py-2 text-right">
+                        <PnL n={sl.naive.pnl} />
+                      </td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {sl.filtered.trades}
+                      </td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {sl.naive.trades}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Gate edge <PnL n={v.pooled.edge} /> vs always-on on selected OOS.
+            Last classified {v.lastRegime.replace("_", "-")}.
+          </p>
+        </>
+      ) : null}
     </>
   );
 }

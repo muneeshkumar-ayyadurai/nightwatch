@@ -20,6 +20,14 @@ import {
   type EngineState,
   type Signals,
 } from "@/lib/regime-engine";
+import {
+  DT_HOURLY,
+  fitPairOu,
+  isTradable,
+  ouZ,
+  spreadX,
+  type OuFit,
+} from "@/lib/ou";
 
 export type { Signals };
 export type RegimeId = "mean_reverting" | "trending" | "high_vol" | "crisis";
@@ -57,7 +65,7 @@ export const REGIME_META: Record<
   crisis: {
     label: "Crisis",
     short: "Crisis",
-    blurb: "Credit, correlation, and vol term structure all scream. Flatten.",
+    blurb: "USD/INR, correlation, and vol term structure all scream. Flatten.",
   },
 };
 
@@ -144,10 +152,13 @@ export interface SimState {
   spreadMean: number;
   spreadStd: number;
   spreadBuf: number[];
+  aBuf: number[];
+  bBuf: number[];
+  ouFit: OuFit | null;
   vix: number;
-  usdInr: number;
-  gilt5: number;
-  gilt10: number;
+  usdInr: number | null;
+  gilt5: number | null;
+  gilt10: number | null;
   signals: Signals;
   signalZ: Signals;
   scores: Record<RegimeId, number>;
@@ -259,11 +270,31 @@ function zscore(buf: number[]) {
   const last = buf[n - 1] ?? 0;
   let mean = 0;
   for (const x of buf) mean += x;
-  mean /= n;
+  mean /= n || 1;
   let v = 0;
   for (const x of buf) v += (x - mean) ** 2;
   const std = Math.sqrt(v / Math.max(1, n - 1)) || 1e-6;
   return { mean, std, z: (last - mean) / std };
+}
+
+function markOu(s: SimState) {
+  s.aBuf.push(s.ko);
+  s.bBuf.push(s.pep);
+  if (s.aBuf.length > SPREAD_WINDOW) s.aBuf.shift();
+  if (s.bBuf.length > SPREAD_WINDOW) s.bBuf.shift();
+  const fit = fitPairOu(s.aBuf, s.bBuf, DT_HOURLY);
+  s.ouFit = fit;
+  if (fit) {
+    s.spread = spreadX(s.ko, s.pep, fit);
+    s.spreadMean = fit.theta;
+    s.spreadStd = fit.eqStd;
+    s.z = ouZ(s.spread, fit);
+  } else {
+    const zs = zscore(s.spreadBuf);
+    s.spreadMean = zs.mean;
+    s.spreadStd = zs.std;
+    s.z = zs.z;
+  }
 }
 
 function mtm(pos: Position, ko: number, pep: number): number {
@@ -362,6 +393,7 @@ function closePos(s: SimState, book: Book, reason: CloseReason) {
 
 function maybeEnter(s: SimState, book: Book, allow: boolean) {
   if (!allow || book.paused || book.position) return;
+  if (!s.ouFit || !isTradable(s.ouFit)) return;
   if (s.hour - book.lastExit < 3) return;
   if (Math.abs(s.z) < Z_ENTRY) return;
   if (Math.abs(s.z) > Z_STOP - 0.2) return;
@@ -374,7 +406,10 @@ function maybeEnter(s: SimState, book: Book, allow: boolean) {
   const aPx = nseTick(s.ko);
   const bPx = nseTick(s.pep);
   const aShares = Math.max(1, Math.round(notional / aPx));
-  const bShares = Math.max(1, Math.round((aShares * aPx) / bPx));
+  const bShares = Math.max(
+    1,
+    Math.round((Math.abs(s.ouFit.beta) * aShares * aPx) / bPx),
+  );
   const aNotional = aShares * aPx;
   const bNotional = bShares * bPx;
   book.realized -= cashCharges(aNotional, bNotional);
@@ -485,14 +520,13 @@ function stepFactors(s: SimState) {
     42,
   );
   const usdT = regime === "crisis" ? 98 : regime === "high_vol" ? 92 : 88;
-  s.usdInr = clamp(
-    s.usdInr + 0.12 * (usdT - s.usdInr) + gauss(s) * 0.12,
-    80,
-    110,
-  );
+  const usd = s.usdInr ?? 88;
+  s.usdInr = clamp(usd + 0.12 * (usdT - usd) + gauss(s) * 0.12, 80, 110);
   const gShock = regime === "crisis" ? -0.004 : 0.0002;
-  s.gilt5 = clamp(s.gilt5 * Math.exp(gShock * 0.5 + gauss(s) * 0.0015), 50, 80);
-  s.gilt10 = clamp(s.gilt10 * Math.exp(gShock + gauss(s) * 0.002), 22, 40);
+  const g5 = s.gilt5 ?? 64;
+  const g10 = s.gilt10 ?? 29.4;
+  s.gilt5 = clamp(g5 * Math.exp(gShock * 0.5 + gauss(s) * 0.0015), 50, 80);
+  s.gilt10 = clamp(g10 * Math.exp(gShock + gauss(s) * 0.002), 22, 40);
   const lastN = s.niftyBuf[s.niftyBuf.length - 1] ?? 24800;
   const lastB = s.bankBuf[s.bankBuf.length - 1] ?? 55600;
   const vol = regime === "crisis" ? 0.012 : regime === "high_vol" ? 0.007 : 0.0035;
@@ -539,10 +573,7 @@ function stepPrices(s: SimState) {
   s.spread = Math.log(s.ko) - Math.log(s.pep);
   s.spreadBuf.push(s.spread);
   if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
-  const zs = zscore(s.spreadBuf);
-  s.spreadMean = zs.mean;
-  s.spreadStd = zs.std;
-  s.z = zs.z;
+  markOu(s);
 }
 
 function cloneSim(state: SimState): SimState {
@@ -553,6 +584,8 @@ function cloneSim(state: SimState): SimState {
     scores: { ...state.scores },
     engine: cloneEngine(state.engine),
     spreadBuf: state.spreadBuf.slice(),
+    aBuf: state.aBuf.slice(),
+    bBuf: state.bBuf.slice(),
     niftyBuf: state.niftyBuf.slice(),
     bankBuf: state.bankBuf.slice(),
     history: state.history.slice(),
@@ -595,15 +628,16 @@ function applyNseBar(s: SimState, bar: NseBar) {
   s.spread = Math.log(s.ko) - Math.log(s.pep);
   s.spreadBuf.push(s.spread);
   if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
-  const zs = zscore(s.spreadBuf);
-  s.spreadMean = zs.mean;
-  s.spreadStd = zs.std;
-  s.z = zs.z;
-  s.niftyBuf.push(bar.nifty);
-  s.bankBuf.push(bar.bank);
+  markOu(s);
+  if (bar.nifty != null) s.niftyBuf.push(bar.nifty);
+  if (bar.bank != null) s.bankBuf.push(bar.bank);
   if (s.niftyBuf.length > SPREAD_WINDOW) s.niftyBuf.shift();
   if (s.bankBuf.length > SPREAD_WINDOW) s.bankBuf.shift();
-  s.signals = signalsFromNse({
+  if (bar.vix != null) s.vix = bar.vix;
+  if (bar.usdInr != null) s.usdInr = bar.usdInr;
+  if (bar.gilt5 != null) s.gilt5 = bar.gilt5;
+  if (bar.gilt10 != null) s.gilt10 = bar.gilt10;
+  const sig = signalsFromNse({
     spreadBuf: s.spreadBuf,
     vix: bar.vix,
     nifty: s.niftyBuf,
@@ -612,11 +646,10 @@ function applyNseBar(s: SimState, bar: NseBar) {
     gilt5: bar.gilt5,
     gilt10: bar.gilt10,
   });
-  s.vix = bar.vix;
-  s.usdInr = bar.usdInr;
-  s.gilt5 = bar.gilt5;
-  s.gilt10 = bar.gilt10;
-  applyEngine(s, s.ts);
+  if (sig) {
+    s.signals = sig;
+    applyEngine(s, s.ts);
+  }
   s.latent = s.classified;
   s.hour += 1;
   manage(s, s.filtered, true);
@@ -649,7 +682,7 @@ export function tick(state: SimState): SimState {
 
   stepPrices(s);
   stepFactors(s);
-  s.signals = signalsFromNse({
+  const sig = signalsFromNse({
     spreadBuf: s.spreadBuf,
     vix: s.vix,
     nifty: s.niftyBuf,
@@ -658,6 +691,7 @@ export function tick(state: SimState): SimState {
     gilt5: s.gilt5,
     gilt10: s.gilt10,
   });
+  if (sig) s.signals = sig;
   s.hour += 1;
   s.ts = advanceNseTs(s.ts);
   applyEngine(s, s.ts);
@@ -691,10 +725,13 @@ export function createInitialState(
     spreadMean: 0,
     spreadStd: 0.01,
     spreadBuf: [],
+    aBuf: [],
+    bBuf: [],
+    ouFit: null,
     vix: 13.2,
-    usdInr: 88,
-    gilt5: 64,
-    gilt10: 29.4,
+    usdInr: null,
+    gilt5: null,
+    gilt10: null,
     signals: emptySignals(),
     signalZ: emptySignals(),
     scores: emptyScores(),
@@ -837,10 +874,10 @@ export const SIGNAL_META: {
     goodHigh: false,
   },
   {
-    key: "credit",
+    key: "usdInr",
     label: "USD/INR",
     unit: "INR",
-    hint: "Spot USDINR. Independent of VIX. Rupee weakness is the external/credit print.",
+    hint: "Spot USD/INR from Yahoo. Independent of VIX. Rupee weakness is the external print.",
     format: (v) => v.toFixed(2),
     goodHigh: false,
   },

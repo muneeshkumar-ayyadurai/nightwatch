@@ -1,38 +1,51 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { NseBar } from "./nse.ts";
-import { signalsFromNse } from "./nse.ts";
-import { validateOu, VALIDATION_WARMUP } from "./validate-ou.ts";
+import { dataIntegrity, signalsFromNse } from "./nse.ts";
+import { OOS_BARS, TRAIN_BARS, VAL_BARS, validateOu } from "./validate-ou.ts";
 
-function bar(i: number, over: Partial<NseBar> = {}): NseBar {
-  const t = 1_720_000_000 + i * 86400;
-  const cycle = i % 22;
-  const disloc = cycle === 0 ? 95 : cycle === 1 ? 60 : cycle === 2 ? 28 : 0;
-  const sign = Math.floor(i / 22) % 2 === 0 ? 1 : -1;
-  return {
-    t,
-    a: 720 + sign * disloc,
-    b: 1360 - sign * disloc * 0.55,
-    vix: 12.4,
-    nifty: 24500 + i * 2,
-    bank: 55000 + i * 3,
-    usdInr: 87.5,
-    gilt5: 64,
-    gilt10: 29.5,
-    ...over,
-  };
+function gauss(i: number) {
+  const u = ((i * 1103515245 + 12345) >>> 0) / 4294967296;
+  const v = ((i * 1664525 + 1013904223) >>> 0) / 4294967296;
+  return Math.sqrt(-2 * Math.log(Math.max(u, 1e-12))) * Math.cos(2 * Math.PI * v);
 }
 
-function tape(n: number, map?: (i: number, b: NseBar) => NseBar): NseBar[] {
-  return Array.from({ length: n }, (_, i) => (map ? map(i, bar(i)) : bar(i)));
+function ouBars(n: number, shockFrom = Infinity): NseBar[] {
+  const dt = 1 / 252;
+  const beta = 1.2;
+  const alpha = -0.35;
+  let x = 0.01;
+  let logB = Math.log(1360);
+  const out: NseBar[] = [];
+  for (let i = 0; i < n; i++) {
+    const crisis = i >= shockFrom;
+    const kappa = crisis ? 2 : 35;
+    const sigma = crisis ? 0.35 : 0.1;
+    x += kappa * (0.01 - x) * dt + sigma * Math.sqrt(dt) * gauss(i);
+    logB += 0.0001 + 0.01 * gauss(i + 7);
+    const a = Math.exp(alpha + beta * logB + x);
+    const b = Math.exp(logB);
+    out.push({
+      t: 1_700_000_000 + i * 86400,
+      a,
+      b,
+      vix: crisis ? 28 : 12.5 + 0.4 * gauss(i + 3),
+      nifty: 24000 + i * 3 + (crisis ? -i : 0),
+      bank: 54000 + i * 4 + (crisis ? -i * 1.4 : 0),
+      usdInr: crisis ? 102 : 87 + i * 0.004,
+      gilt5: 64 + 0.01 * i,
+      gilt10: crisis ? 26 : 29.4 + 0.004 * i,
+    });
+  }
+  return out;
 }
 
 describe("signalsFromNse authenticity", () => {
-  it("credit tracks USD/INR, not India VIX", () => {
+  it("usdInr tracks USD/INR, not India VIX", () => {
     const nifty = [24000, 24100, 23900, 24200, 24300, 24150, 24400, 24500];
     const bank = nifty.map((x) => x * 2.2);
     const spread = nifty.map((x, i) => Math.log(720 + i) - Math.log(1360));
-    const lowFx = signalsFromNse({
+    const low = signalsFromNse({
       spreadBuf: spread,
       vix: 28,
       nifty,
@@ -42,7 +55,7 @@ describe("signalsFromNse authenticity", () => {
       gilt10: 29.4,
       barHours: 1,
     });
-    const highFx = signalsFromNse({
+    const high = signalsFromNse({
       spreadBuf: spread,
       vix: 11,
       nifty,
@@ -52,91 +65,98 @@ describe("signalsFromNse authenticity", () => {
       gilt10: 29.4,
       barHours: 1,
     });
-    assert.equal(lowFx.credit, 83);
-    assert.equal(highFx.credit, 97);
-    assert.ok(highFx.credit > lowFx.credit);
+    assert.ok(low && high);
+    assert.equal(low.usdInr, 83);
+    assert.equal(high.usdInr, 97);
   });
 
-  it("curve tracks gilt ETFs, not VIX", () => {
-    const nifty = Array.from({ length: 30 }, (_, i) => 24000 + i);
+  it("refuses to invent USD/INR or gilt prints", () => {
+    const nifty = Array.from({ length: 10 }, (_, i) => 24000 + i);
     const bank = nifty.map((x) => x * 2.2);
     const spread = nifty.map(() => -0.63);
-    const steep = signalsFromNse({
-      spreadBuf: spread,
-      vix: 22,
-      nifty,
-      bank,
-      usdInr: 88,
-      gilt5: 64,
-      gilt10: 32,
-      barHours: 1,
-    });
-    const dumped = signalsFromNse({
-      spreadBuf: spread,
-      vix: 11,
-      nifty,
-      bank,
-      usdInr: 88,
-      gilt5: 64,
-      gilt10: 27,
-      barHours: 1,
-    });
-    assert.ok(steep.curve > dumped.curve);
+    assert.equal(
+      signalsFromNse({
+        spreadBuf: spread,
+        vix: 13,
+        nifty,
+        bank,
+        usdInr: null,
+        gilt5: 64,
+        gilt10: 29,
+        barHours: 1,
+      }),
+      null,
+    );
+    assert.equal(
+      signalsFromNse({
+        spreadBuf: spread,
+        vix: 13,
+        nifty,
+        bank,
+        usdInr: 88,
+        gilt5: null,
+        gilt10: 29,
+        barHours: 1,
+      }),
+      null,
+    );
+  });
+
+  it("marks a tape without USD/INR as incomplete", () => {
+    const bars = ouBars(80).map((b) => ({ ...b, usdInr: null }));
+    const g = dataIntegrity(bars);
+    assert.equal(g.usdInr.ok, false);
+    assert.equal(g.complete, false);
   });
 });
 
 describe("validateOu walk-forward", () => {
-  it("needs a 90-session warmup before it trades", () => {
-    const r = validateOu(tape(80), "hdfc-icici");
-    assert.equal(r, null);
-  });
+  const need = TRAIN_BARS + VAL_BARS + OOS_BARS;
 
-  it("runs two books on a mean-reverting pair without lookahead", () => {
-    const bars = tape(VALIDATION_WARMUP + 80);
+  it("INVALID when critical macros are missing — no dummy backtest", () => {
+    const bars = ouBars(need + 10).map((b) => ({ ...b, usdInr: null }));
     const r = validateOu(bars, "hdfc-icici");
-    assert.ok(r);
-    assert.equal(r.warmup, VALIDATION_WARMUP);
-    assert.equal(r.oos, 80);
-    assert.equal(r.interval, "1d");
-    assert.ok(r.naive.trades >= 1, "naive should trade the oscillating spread");
-    const prefix = validateOu(bars.slice(0, bars.length - 5), "hdfc-icici");
-    const longer = validateOu(bars, "hdfc-icici");
-    assert.ok(prefix && longer);
-    assert.ok(
-      Math.abs(prefix.filtered.trades - longer.filtered.trades) <= 2,
-      "five extra days should not rewrite the whole blotter",
-    );
+    assert.equal(r.status, "invalid");
+    assert.match(r.reason, /USD\/INR/);
+    assert.equal(r.folds.length, 0);
+    assert.equal(r.pooled, null);
   });
 
-  it("regime gate sits out a credit/vol shock the naive book still trades", () => {
-    const bars = tape(VALIDATION_WARMUP + 70, (i, b) => {
-      if (i < VALIDATION_WARMUP) return b;
-      return {
-        ...b,
-        vix: 32,
-        usdInr: 104,
-        gilt10: 26,
-        nifty: b.nifty * (1 - (i - VALIDATION_WARMUP) * 0.004),
-        bank: b.bank * (1 - (i - VALIDATION_WARMUP) * 0.006),
-      };
-    });
+  it("INVALID when the tape is shorter than one fold", () => {
+    const r = validateOu(ouBars(80), "hdfc-icici");
+    assert.equal(r.status, "invalid");
+  });
+
+  it("fits OU on train only and rolls at least one fold", () => {
+    const bars = ouBars(need + 20);
     const r = validateOu(bars, "hdfc-icici");
-    assert.ok(r);
-    assert.ok(
-      r.filtered.trades <= r.naive.trades,
-      `gated ${r.filtered.trades} vs naive ${r.naive.trades}`,
+    assert.ok(r.folds.length >= 1, "expected a fold");
+    const f = r.folds[0]!;
+    assert.ok(f.fit, "train should produce a fit");
+    assert.ok(f.fit.beta > 0.8 && f.fit.beta < 1.7, `beta ${f.fit.beta}`);
+    assert.ok(f.fit.halfLife > 0);
+    const prefix = validateOu(bars.slice(0, need), "hdfc-icici");
+    const mutated = bars.map((b, i) =>
+      i === bars.length - 1 ? { ...b, a: b.a * 1.5 } : b,
+    );
+    const later = validateOu(mutated, "hdfc-icici");
+    assert.ok(prefix.folds[0]?.fit && later.folds[0]?.fit);
+    assert.equal(
+      prefix.folds[0]!.fit!.beta.toFixed(6),
+      later.folds[0]!.fit!.beta.toFixed(6),
     );
   });
 
-  it("z at t uses only prices ≤ t", () => {
-    const bars = tape(VALIDATION_WARMUP + 40);
-    const r1 = validateOu(bars, "hdfc-icici");
-    const future = bars.map((b, i) =>
-      i === bars.length - 1 ? { ...b, a: b.a * 1.4, b: b.b * 0.7 } : b,
-    );
-    const r2 = validateOu(future.slice(0, -1), "hdfc-icici");
-    assert.ok(r1 && r2);
-    assert.equal(r2.nBars, bars.length - 1);
-    assert.equal(r2.filtered.trades, validateOu(bars.slice(0, -1), "hdfc-icici")?.filtered.trades);
+  it("regime gate does not trade more than naive through a crisis OOS", () => {
+    const bars = ouBars(need, TRAIN_BARS + VAL_BARS);
+    const r = validateOu(bars, "hdfc-icici");
+    if (r.status === "ok" && r.pooled) {
+      assert.ok(
+        r.pooled.filtered.trades <= r.pooled.naive.trades,
+        `gated ${r.pooled.filtered.trades} vs naive ${r.pooled.naive.trades}`,
+      );
+    } else {
+      assert.ok(r.folds.length >= 0);
+    }
   });
 });

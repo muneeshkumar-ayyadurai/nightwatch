@@ -1,3 +1,4 @@
+import type { Signals } from "./regime-engine.ts";
 import type { ValidationReport } from "./validate-ou.ts";
 
 export interface NseLeg {
@@ -83,12 +84,29 @@ export interface NseBar {
   t: number;
   a: number;
   b: number;
-  vix: number;
-  nifty: number;
-  bank: number;
-  usdInr: number;
-  gilt5: number;
-  gilt10: number;
+  vix: number | null;
+  nifty: number | null;
+  bank: number | null;
+  usdInr: number | null;
+  gilt5: number | null;
+  gilt10: number | null;
+}
+
+export interface SeriesCoverage {
+  n: number;
+  present: number;
+  ok: boolean;
+}
+
+export interface DataIntegrity {
+  pair: SeriesCoverage;
+  vix: SeriesCoverage;
+  nifty: SeriesCoverage;
+  bank: SeriesCoverage;
+  usdInr: SeriesCoverage;
+  gilt: SeriesCoverage;
+  complete: boolean;
+  notes: string[];
 }
 
 export interface NseTape {
@@ -96,16 +114,10 @@ export interface NseTape {
   bars: NseBar[];
   last: NseBar;
   fetchedAt: number;
-  history90?: {
-    hurst: number;
-    vixTerm: number;
-    rvIv: number;
-    correlation: number;
-    credit: number;
-    curve: number;
-  }[];
+  history90?: Signals[];
   lastDay?: string;
   daily?: NseBar[];
+  integrity?: DataIntegrity;
   validation?: ValidationReport;
 }
 
@@ -215,40 +227,68 @@ export function realizedVol(
   return std * Math.sqrt(barsPerYear);
 }
 
+export function coverage(
+  bars: NseBar[],
+  pick: (b: NseBar) => number | null,
+  minPresent = 60,
+  minFrac = 0.8,
+): SeriesCoverage {
+  let present = 0;
+  for (const b of bars) if (pick(b) != null) present += 1;
+  const n = bars.length;
+  return { n, present, ok: present >= minPresent && (n === 0 ? false : present / n >= minFrac) };
+}
+
+export function dataIntegrity(bars: NseBar[]): DataIntegrity {
+  const pair: SeriesCoverage = {
+    n: bars.length,
+    present: bars.length,
+    ok: bars.length >= 200,
+  };
+  const vix = coverage(bars, (b) => b.vix);
+  const nifty = coverage(bars, (b) => b.nifty);
+  const bank = coverage(bars, (b) => b.bank);
+  const usdInr = coverage(bars, (b) => b.usdInr);
+  const gilt = coverage(bars, (b) =>
+    b.gilt5 != null && b.gilt10 != null ? b.gilt5 : null,
+  );
+  const notes: string[] = [];
+  if (!pair.ok) notes.push(`pair tape too short (${pair.present} sessions)`);
+  if (!vix.ok) notes.push("India VIX missing or sparse");
+  if (!nifty.ok) notes.push("Nifty missing or sparse");
+  if (!bank.ok) notes.push("Bank Nifty missing or sparse");
+  if (!usdInr.ok) notes.push("USD/INR missing or sparse — no dummy FX");
+  if (!gilt.ok) notes.push("gilt ETFs missing or sparse — no dummy curve");
+  const complete = pair.ok && vix.ok && nifty.ok && bank.ok && usdInr.ok && gilt.ok;
+  return { pair, vix, nifty, bank, usdInr, gilt, complete, notes };
+}
+
 export function signalsFromNse(args: {
   spreadBuf: number[];
-  vix: number;
+  vix: number | null;
   nifty: number[];
   bank: number[];
-  usdInr?: number;
-  gilt5?: number;
-  gilt10?: number;
+  usdInr: number | null;
+  gilt5: number | null;
+  gilt10: number | null;
   barHours?: number;
-}): {
-  hurst: number;
-  vixTerm: number;
-  rvIv: number;
-  correlation: number;
-  credit: number;
-  curve: number;
-} {
+}): Signals | null {
+  if (args.vix == null || !(args.vix > 0)) return null;
+  if (args.usdInr == null || !(args.usdInr > 0)) return null;
+  if (args.gilt5 == null || args.gilt10 == null) return null;
+  if (!(args.gilt5 > 0) || !(args.gilt10 > 0)) return null;
+  if (args.nifty.length < 6 || args.bank.length < 6) return null;
   const hours = args.barHours ?? SESSION_HOURS;
   const bpy = hours <= 1 ? 252 : 252 * SESSION_HOURS;
   const dayBars = hours <= 1 ? 1 : SESSION_HOURS;
-  const hurst = hurstRough(args.spreadBuf);
-  const vix = args.vix || 13.2;
   const rv20 = realizedVol(args.nifty, bpy, 20 * dayBars);
   const rv5 = realizedVol(args.nifty, bpy, 5 * dayBars);
-  const iv = vix / 100;
-  const usd = args.usdInr ?? 88;
-  const g5 = Math.max(1e-6, args.gilt5 ?? 64);
-  const g10 = Math.max(1e-6, args.gilt10 ?? 29.4);
   return {
-    hurst,
+    hurst: hurstRough(args.spreadBuf),
     vixTerm: rv20 - rv5,
-    rvIv: rv20 - iv,
+    rvIv: rv20 - args.vix / 100,
     correlation: rollingCorr(args.nifty, args.bank),
-    credit: usd,
-    curve: Math.log(g10) - Math.log(g5),
+    usdInr: args.usdInr,
+    curve: Math.log(args.gilt10) - Math.log(args.gilt5),
   };
 }
