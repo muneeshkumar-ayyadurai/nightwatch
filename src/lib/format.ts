@@ -1,26 +1,30 @@
-const usd0 = new Intl.NumberFormat("en-US", {
+const inr0 = new Intl.NumberFormat("en-IN", {
   style: "currency",
-  currency: "USD",
+  currency: "INR",
   maximumFractionDigits: 0,
 });
 
-const usd2 = new Intl.NumberFormat("en-US", {
+const inr2 = new Intl.NumberFormat("en-IN", {
   style: "currency",
-  currency: "USD",
+  currency: "INR",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-export function usd(n: number, digits: 0 | 2 = 0): string {
-  return (digits === 2 ? usd2 : usd0).format(n);
+export function inr(n: number, digits: 0 | 2 = 0): string {
+  return (digits === 2 ? inr2 : inr0).format(n);
 }
 
-export function usdSigned(n: number, digits: 0 | 2 = 0): string {
-  const body = (digits === 2 ? usd2 : usd0).format(Math.abs(n));
+export const usd = inr;
+
+export function inrSigned(n: number, digits: 0 | 2 = 0): string {
+  const body = (digits === 2 ? inr2 : inr0).format(Math.abs(n));
   if (n > 0.004) return `+${body}`;
   if (n < -0.004) return `−${body}`;
   return body;
 }
+
+export const usdSigned = inrSigned;
 
 export function pct(n: number, digits = 1): string {
   const v = (n * 100).toFixed(digits);
@@ -33,18 +37,23 @@ export function num(n: number, digits = 2): string {
   return n.toFixed(digits);
 }
 
-const simFmt = new Intl.DateTimeFormat("en-US", {
+const istFmt = new Intl.DateTimeFormat("en-IN", {
   weekday: "short",
-  month: "short",
   day: "numeric",
+  month: "short",
   hour: "2-digit",
   minute: "2-digit",
   hour12: false,
-  timeZone: "America/New_York",
+  timeZone: "Asia/Kolkata",
 });
 
-export const START_MS = Date.UTC(2026, 8, 14, 13, 30, 0);
+export const START_MS = Date.UTC(2026, 8, 14, 3, 45, 0);
 
-export function simClock(hours: number): string {
-  return `${simFmt.format(new Date(START_MS + hours * 3600_000))} ET`;
+export function simClock(hours: number, ts?: number): string {
+  const t = ts && ts > 0 ? ts : START_MS + hours * 3600_000;
+  return `${istFmt.format(new Date(t))} IST`;
+}
+
+export function lakh(n: number): string {
+  return `${(n / 100_000).toFixed(1)}L`;
 }

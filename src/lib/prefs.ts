@@ -8,6 +8,7 @@ export interface DeskPrefs {
   mode: Mode;
   autoFlattenCrisis: boolean;
   speed: number;
+  pairId: string;
 }
 
 const PREFS_KEY = "nightwatch.prefs.v1";
@@ -45,7 +46,8 @@ export function prefsChanged(
     a.dailyLoss !== b.dailyLoss ||
     a.mode !== b.mode ||
     a.autoFlattenCrisis !== b.autoFlattenCrisis ||
-    a.speed !== b.speed
+    a.speed !== b.speed ||
+    a.pairId !== b.pairId
   );
 }
 
@@ -58,6 +60,7 @@ export function snapshotPrefs(s: DeskPrefs): DeskPrefs {
     mode: s.mode,
     autoFlattenCrisis: s.autoFlattenCrisis,
     speed: s.speed,
+    pairId: s.pairId,
   };
 }
 

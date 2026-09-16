@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { fetchNseTape } from "@/lib/nse-feed";
 import {
   prefsChanged,
   readPrefs,
@@ -11,16 +12,41 @@ export function SimProvider({ children }: { children: ReactNode }) {
   const running = useSim((s) => s.running);
   const speed = useSim((s) => s.speed);
   const killed = useSim((s) => s.killed);
+  const pairId = useSim((s) => s.pairId);
+  const feedStatus = useSim((s) => s.feedStatus);
 
   useEffect(() => {
     const saved = readPrefs();
-    if (saved) useSim.setState(saved);
+    if (saved) {
+      const { pairId: savedPair, ...rest } = saved;
+      if (savedPair && savedPair !== useSim.getState().pairId) {
+        useSim.getState().setPair(savedPair);
+      }
+      useSim.setState(rest);
+    }
     return useSim.subscribe((s, prev) => {
       const next = snapshotPrefs(s);
       const before = snapshotPrefs(prev);
       if (prefsChanged(next, before)) writePrefs(next);
     });
   }, []);
+
+  useEffect(() => {
+    if (feedStatus !== "loading") return;
+    let cancelled = false;
+    fetchNseTape({ data: { pairId } })
+      .then((tape) => {
+        if (cancelled) return;
+        if (tape) useSim.getState().hydrateFeed(tape);
+        else useSim.setState({ feedStatus: "sim" });
+      })
+      .catch(() => {
+        if (!cancelled) useSim.setState({ feedStatus: "sim" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pairId, feedStatus]);
 
   useEffect(() => {
     if (!running || killed) return;

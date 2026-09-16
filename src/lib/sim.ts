@@ -1,3 +1,13 @@
+import {
+  DEFAULT_PAIR_ID,
+  SESSION_HOURS,
+  advanceNseTs,
+  pairOf,
+  signalsFromNse,
+  type NsePair,
+  type NseTape,
+} from "@/lib/nse";
+
 export type RegimeId = "mean_reverting" | "trending" | "high_vol" | "crisis";
 export type Side = "long_spread" | "short_spread";
 export type CloseReason = "target" | "stop" | "time" | "regime" | "kill" | "risk";
@@ -37,12 +47,10 @@ export const REGIME_META: Record<
   },
 };
 
-export const PAIR = {
-  a: { symbol: "KO", name: "Coca-Cola" },
-  b: { symbol: "PEP", name: "PepsiCo" },
-} as const;
+export const PAIR: NsePair = pairOf(DEFAULT_PAIR_ID);
 
-export const INITIAL_EQUITY = 100_000;
+export const INITIAL_EQUITY = 1_000_000;
+export const MIN_NOTIONAL = 220_000;
 export const Z_ENTRY = 1.75;
 export const Z_EXIT = 0.4;
 export const Z_STOP = 4.2;
@@ -103,6 +111,7 @@ export interface Alert {
 
 export interface Point {
   t: number;
+  ts: number;
   ko: number;
   pep: number;
   spread: number;
@@ -114,8 +123,11 @@ export interface Point {
 
 export interface SimState {
   hour: number;
+  ts: number;
   seed: number;
   n: number;
+  pairId: string;
+  tape: "nse" | "sim";
   ko: number;
   pep: number;
   spread: number;
@@ -152,7 +164,7 @@ const TARGETS: Record<RegimeId, Signals> = {
     vixTerm: 0.82,
     rvIv: -0.18,
     correlation: 0.22,
-    credit: 318,
+    credit: 78,
     curve: 0.48,
   },
   trending: {
@@ -160,7 +172,7 @@ const TARGETS: Record<RegimeId, Signals> = {
     vixTerm: 0.28,
     rvIv: 0.12,
     correlation: 0.48,
-    credit: 372,
+    credit: 96,
     curve: 0.12,
   },
   high_vol: {
@@ -168,7 +180,7 @@ const TARGETS: Record<RegimeId, Signals> = {
     vixTerm: -0.42,
     rvIv: 0.62,
     correlation: 0.66,
-    credit: 528,
+    credit: 148,
     curve: -0.08,
   },
   crisis: {
@@ -176,7 +188,7 @@ const TARGETS: Record<RegimeId, Signals> = {
     vixTerm: -1.18,
     rvIv: 1.35,
     correlation: 0.93,
-    credit: 912,
+    credit: 238,
     curve: -0.62,
   },
 };
@@ -225,7 +237,7 @@ function emptySignals(): Signals {
 }
 
 export function classify(sig: Signals): RegimeId {
-  if (sig.credit > 720 || sig.correlation > 0.86 || sig.vixTerm < -0.85) {
+  if (sig.credit > 190 || sig.correlation > 0.86 || sig.vixTerm < -0.85) {
     return "crisis";
   }
   if (sig.rvIv > 0.48 || sig.vixTerm < -0.18) return "high_vol";
@@ -355,7 +367,7 @@ function closePos(s: SimState, book: Book, reason: CloseReason) {
     s,
     pnl < -400 || reason === "kill" || reason === "regime" ? "warn" : "info",
     `${who}: ${verb}`,
-    `${pos.side === "long_spread" ? "Long" : "Short"} KO/PEP  ·  ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(0)}`,
+    `${pos.side === "long_spread" ? "Long" : "Short"} ${pairOf(s.pairId).a.symbol}/${pairOf(s.pairId).b.symbol}  ·  ${pnl >= 0 ? "+" : "−"}₹${Math.abs(pnl).toFixed(0)}`,
   );
 }
 
@@ -366,7 +378,9 @@ function maybeEnter(s: SimState, book: Book, allow: boolean) {
   if (Math.abs(s.z) > Z_STOP - 0.2) return;
   const eq = equityOf(book, s.ko, s.pep);
   const k = Math.max(kelly(book, s.kellyBlend), 0.14);
-  const notional = clamp(k * eq, 22_000, eq * 0.28);
+  const cap = eq * 0.28;
+  const floor = Math.min(MIN_NOTIONAL, cap);
+  const notional = clamp(k * eq, floor, cap);
   const side: Side = s.z > 0 ? "short_spread" : "long_spread";
   book.position = {
     side,
@@ -383,19 +397,19 @@ function maybeEnter(s: SimState, book: Book, allow: boolean) {
     s,
     "info",
     `${who}: ${side === "long_spread" ? "Long" : "Short"} spread`,
-    `z ${s.z.toFixed(2)}  ·  ${usdShort(notional)} notional`,
+    `z ${s.z.toFixed(2)}  ·  ${inrShort(notional)} notional`,
   );
 }
 
-function usdShort(n: number) {
-  return `$${Math.round(n).toLocaleString("en-US")}`;
+function inrShort(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
 function manage(s: SimState, book: Book, filter: boolean) {
   const eq = equityOf(book, s.ko, s.pep);
   book.peak = Math.max(book.peak, eq);
 
-  if (s.hour - book.dayHour >= 24) {
+  if (s.hour - book.dayHour >= SESSION_HOURS) {
     book.dayStart = eq;
     book.dayHour = s.hour;
   }
@@ -468,9 +482,9 @@ function lerpSignals(s: SimState) {
       0.99,
     ),
     credit: clamp(
-      s.signals.credit + a * (target.credit - s.signals.credit) + n(8),
-      180,
-      1400,
+      s.signals.credit + a * (target.credit - s.signals.credit) + n(4),
+      40,
+      320,
     ),
     curve: s.signals.curve + a * (target.curve - s.signals.curve) + n(0.03),
   };
@@ -494,7 +508,8 @@ function stepPrices(s: SimState) {
     s.ko *= Math.exp(-0.0018 + 0.004 * gauss(s));
   }
   let spread = Math.log(s.ko) - Math.log(s.pep);
-  const mu = Math.log(64.4) - Math.log(171.6);
+  const pair = pairOf(s.pairId);
+  const mu = Math.log(pair.a0) - Math.log(pair.b0);
   const shock = regime === "crisis" ? 0.018 * gauss(s) : 0;
   const trendPush =
     regime === "trending" ? 0.0048 * Math.sign(spread - mu || 1) : 0;
@@ -561,12 +576,14 @@ export function tick(state: SimState): SimState {
 
   stepPrices(s);
   s.hour += 1;
+  s.ts = advanceNseTs(s.ts);
 
   manage(s, s.filtered, true);
   manage(s, s.naive, false);
 
   s.history.push({
     t: s.hour,
+    ts: s.ts,
     ko: s.ko,
     pep: s.pep,
     spread: s.spread,
@@ -580,14 +597,22 @@ export function tick(state: SimState): SimState {
   return s;
 }
 
-export function createInitialState(seed = 2026): SimState {
+export function createInitialState(
+  seed = 2026,
+  pairId = DEFAULT_PAIR_ID,
+  opts: { bootstrap?: boolean } = { bootstrap: true },
+): SimState {
+  const pair = pairOf(pairId);
   let s: SimState = {
     hour: 0,
+    ts: Date.UTC(2026, 8, 14, 3, 45, 0),
     seed,
     n: 0,
-    ko: 64.42,
-    pep: 171.58,
-    spread: Math.log(64.42) - Math.log(171.58),
+    pairId: pair.id,
+    tape: "sim",
+    ko: pair.a0,
+    pep: pair.b0,
+    spread: Math.log(pair.a0) - Math.log(pair.b0),
     z: 0,
     spreadMean: 0,
     spreadStd: 0.01,
@@ -614,6 +639,7 @@ export function createInitialState(seed = 2026): SimState {
     nextId: 1,
     lastRegime: "mean_reverting",
   };
+  if (!opts.bootstrap) return s;
   const script: { hours: number; force: RegimeId | null }[] = [
     { hours: 36, force: "mean_reverting" },
     { hours: 28, force: "trending" },
@@ -631,6 +657,64 @@ export function createInitialState(seed = 2026): SimState {
   return s;
 }
 
+export function playTape(seed: number, tape: NseTape): SimState {
+  let s = createInitialState(seed, tape.pairId, { bootstrap: false });
+  const nifty: number[] = [];
+  const bank: number[] = [];
+  for (const bar of tape.bars) {
+    s.ko = bar.a;
+    s.pep = bar.b;
+    s.ts = bar.t * 1000;
+    s.spread = Math.log(s.ko) - Math.log(s.pep);
+    s.spreadBuf.push(s.spread);
+    if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
+    const zs = zscore(s.spreadBuf);
+    s.spreadMean = zs.mean;
+    s.spreadStd = zs.std;
+    s.z = zs.z;
+    nifty.push(bar.nifty);
+    bank.push(bar.bank);
+    if (nifty.length > SPREAD_WINDOW) nifty.shift();
+    if (bank.length > SPREAD_WINDOW) bank.shift();
+    s.signals = signalsFromNse({
+      spreadBuf: s.spreadBuf,
+      vix: bar.vix,
+      nifty,
+      bank,
+    });
+    s.latent = classify(s.signals);
+    s.regime = s.latent;
+    if (s.regime !== s.lastRegime) {
+      pushAlert(
+        s,
+        s.regime === "crisis" ? "crit" : s.regime === "high_vol" ? "warn" : "info",
+        `Regime → ${REGIME_META[s.regime].label}`,
+        REGIME_META[s.regime].blurb,
+      );
+      s.lastRegime = s.regime;
+    }
+    s.hour += 1;
+    manage(s, s.filtered, true);
+    manage(s, s.naive, false);
+    s.history.push({
+      t: s.hour,
+      ts: s.ts,
+      ko: s.ko,
+      pep: s.pep,
+      spread: s.spread,
+      z: s.z,
+      filtered: equityOf(s.filtered, s.ko, s.pep),
+      naive: equityOf(s.naive, s.ko, s.pep),
+      regime: s.regime,
+    });
+    if (s.history.length > HISTORY_CAP) s.history.shift();
+  }
+  s.tape = "nse";
+  s.forceRegime = null;
+  s.alerts = s.alerts.slice(-8);
+  return s;
+}
+
 export function maxDrawdown(series: number[]): number {
   let peak = series[0] ?? INITIAL_EQUITY;
   let max = 0;
@@ -644,7 +728,7 @@ export function maxDrawdown(series: number[]): number {
 export function simSharpe(history: Point[], key: "filtered" | "naive"): number | null {
   if (history.length < 48) return null;
   const daily: number[] = [];
-  for (let i = 24; i < history.length; i += 24) {
+  for (let i = SESSION_HOURS; i < history.length; i += SESSION_HOURS) {
     const prev = history[i - 24]![key];
     const cur = history[i]![key];
     daily.push(cur / prev - 1);
@@ -681,9 +765,9 @@ export const SIGNAL_META: {
   },
   {
     key: "vixTerm",
-    label: "VIX term structure",
+    label: "India VIX term",
     unit: "pts",
-    hint: "Positive = contango (calm). Negative = backwardation (stress).",
+    hint: "Calm India VIX sits in contango. Spikes look like backwardation.",
     format: (v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)),
     goodHigh: true,
   },
@@ -691,31 +775,31 @@ export const SIGNAL_META: {
     key: "rvIv",
     label: "Realized vs implied",
     unit: "vol",
-    hint: "Realized minus implied. Positive = vol underpriced, risk-off.",
+    hint: "Nifty realized minus India VIX. Positive = vol underpriced, risk-off.",
     format: (v) => (v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2)),
     goodHigh: false,
   },
   {
     key: "correlation",
-    label: "Cross-asset corr",
+    label: "Nifty–Bank Nifty corr",
     unit: "ρ",
-    hint: "Risk-on is dispersed. Crisis correlation piles toward 1.",
+    hint: "Risk-on is dispersed. Crisis correlation of the two indices piles toward 1.",
     format: (v) => v.toFixed(2),
     goodHigh: false,
   },
   {
     key: "credit",
-    label: "Credit spreads",
+    label: "India 5y CDS",
     unit: "bps",
-    hint: "HY OAS. Stress shows up here before equities finish falling.",
+    hint: "Sovereign stress proxy. Widens before the cash book finishes falling.",
     format: (v) => `${Math.round(v)}`,
     goodHigh: false,
   },
   {
     key: "curve",
-    label: "Rates curve slope",
+    label: "G-Sec 10y–2y",
     unit: "%",
-    hint: "10y–2y. Inversion leans recession; steepening leans growth.",
+    hint: "Indian curve. Inversion leans risk-off; steepening leans growth.",
     format: (v) => `${v.toFixed(2)}`,
     goodHigh: true,
   },

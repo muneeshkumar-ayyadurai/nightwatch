@@ -6,8 +6,8 @@ const RANGES: Record<keyof Signals, [number, number]> = {
   vixTerm: [-1.5, 1.2],
   rvIv: [-0.8, 1.6],
   correlation: [0, 1],
-  credit: [180, 1200],
-  curve: [-0.9, 0.8],
+  credit: [40, 320],
+  curve: [-0.9, 0.9],
 };
 
 function unit(v: number, lo: number, hi: number) {

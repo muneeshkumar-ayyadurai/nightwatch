@@ -5,13 +5,13 @@ import { PairChart, ZChart } from "@/components/charts";
 import { Badge } from "@/components/ui/badge";
 import {
   MAX_HOLD_HOURS,
-  PAIR,
   Z_ENTRY,
   Z_EXIT,
   Z_STOP,
   equityOf,
 } from "@/lib/sim";
-import { usd } from "@/lib/format";
+import { pairOf } from "@/lib/nse";
+import { inr } from "@/lib/format";
 import { useSim } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +43,8 @@ function StrategyPage() {
   const z = useSim((s) => s.z);
   const regime = useSim((s) => s.regime);
   const filterOn = useSim((s) => s.filterOn);
+  const pairId = useSim((s) => s.pairId);
+  const pair = pairOf(pairId);
   const pos = filtered.position;
   const eq = equityOf(filtered, ko, pep);
 
@@ -57,9 +59,9 @@ function StrategyPage() {
             Start with one pair.
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            Ornstein–Uhlenbeck statistical arbitrage on {PAIR.a.symbol}/
-            {PAIR.b.symbol}. Same model the naive book runs — the only
-            difference is the gate.
+            Ornstein–Uhlenbeck statistical arbitrage on {pair.a.symbol}/
+            {pair.b.symbol}. Same model the naive book runs — the only
+            difference is the gate. Cash NSE, rupee-neutral log-spread.
           </p>
         </header>
 
@@ -70,7 +72,7 @@ function StrategyPage() {
               Ornstein–Uhlenbeck
             </p>
             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-              Dollar-neutral log-spread. Mean reverts when Hurst is asleep.
+              Rupee-neutral log-spread. Mean reverts when Hurst is asleep.
             </p>
             <Badge className="mt-4" variant="up">
               Running
@@ -96,10 +98,12 @@ function StrategyPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-5">
-          <Panel title="KO / PEP tape" className="lg:col-span-3">
-            <PairChart data={history} />
+          <Panel title={`${pair.a.symbol} / ${pair.b.symbol} tape`} className="lg:col-span-3">
+            <PairChart data={history} a={pair.a.symbol} b={pair.b.symbol} />
             <div className="mt-4">
-              <p className="mb-2 text-xs text-muted-foreground">z-score of log(KO) − log(PEP)</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                z-score of log({pair.a.symbol}) − log({pair.b.symbol})
+              </p>
               <ZChart data={history} />
             </div>
           </Panel>
@@ -171,7 +175,7 @@ function StrategyPage() {
             </div>
           )}
           <p className="mt-4 text-xs text-muted-foreground">
-            Mark-to-market equity {usd(eq)} · realized {usd(filtered.realized)}
+            Mark-to-market equity {inr(eq)} · realized {inr(filtered.realized)}
           </p>
         </Panel>
       </div>

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 const STEPS = [
   {
     title: "Two books. One tape.",
-    body: "The regime book and the always-on book trade the same KO/PEP spread. The only difference is the weather report. That gap is the product.",
+    body: "The regime book and the always-on book trade the same NSE pair — HDFC Bank vs ICICI, HUL vs ITC, TCS vs Infosys. The only difference is the weather report.",
   },
   {
     title: "Force a crisis.",

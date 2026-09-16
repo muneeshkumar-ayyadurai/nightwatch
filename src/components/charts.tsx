@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { INITIAL_EQUITY, type Point } from "@/lib/sim";
-import { usd } from "@/lib/format";
+import { inr, lakh } from "@/lib/format";
 
 function ChartTip({
   active,
@@ -31,7 +31,7 @@ function ChartTip({
         <p key={p.name} className="font-mono tabular-nums">
           {p.name}{" "}
           {kind === "equity"
-            ? usd(p.value)
+            ? inr(p.value)
             : kind === "z"
               ? p.value.toFixed(2)
               : p.value.toFixed(2)}
@@ -49,10 +49,10 @@ export function EquityChart({ data }: { data: Point[] }) {
           <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
           <XAxis dataKey="t" hide />
           <YAxis
-            domain={["dataMin - 400", "dataMax + 400"]}
+            domain={["dataMin - 8000", "dataMax + 8000"]}
             tick={{ fill: "#8b919a", fontSize: 11, fontFamily: "IBM Plex Mono" }}
-            tickFormatter={(v) => `${Math.round(v / 1000)}k`}
-            width={36}
+            tickFormatter={(v) => lakh(v)}
+            width={44}
             axisLine={false}
             tickLine={false}
           />
@@ -82,7 +82,15 @@ export function EquityChart({ data }: { data: Point[] }) {
   );
 }
 
-export function PairChart({ data }: { data: Point[] }) {
+export function PairChart({
+  data,
+  a = "A",
+  b = "B",
+}: {
+  data: Point[];
+  a?: string;
+  b?: string;
+}) {
   return (
     <div className="h-44 w-full sm:h-52">
       <ResponsiveContainer width="100%" height="100%">
@@ -96,7 +104,7 @@ export function PairChart({ data }: { data: Point[] }) {
             width={36}
             axisLine={false}
             tickLine={false}
-            domain={["dataMin - 0.4", "dataMax + 0.4"]}
+            domain={["dataMin - 8", "dataMax + 8"]}
           />
           <YAxis
             yAxisId="b"
@@ -106,14 +114,14 @@ export function PairChart({ data }: { data: Point[] }) {
             width={36}
             axisLine={false}
             tickLine={false}
-            domain={["dataMin - 1", "dataMax + 1"]}
+            domain={["dataMin - 8", "dataMax + 8"]}
           />
           <Tooltip content={<ChartTip kind="pair" />} />
           <Line
             yAxisId="a"
             type="monotone"
             dataKey="ko"
-            name="KO"
+            name={a}
             stroke="var(--color-filtered)"
             strokeWidth={1.6}
             dot={false}
@@ -123,7 +131,7 @@ export function PairChart({ data }: { data: Point[] }) {
             yAxisId="b"
             type="monotone"
             dataKey="pep"
-            name="PEP"
+            name={b}
             stroke="var(--color-muted)"
             strokeWidth={1.6}
             dot={false}

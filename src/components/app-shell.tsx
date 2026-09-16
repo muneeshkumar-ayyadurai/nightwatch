@@ -11,6 +11,7 @@ import {
   LineChart,
 } from "lucide-react";
 import { simClock } from "@/lib/format";
+import { nseSessionNow } from "@/lib/nse";
 import { REGIME_META, type Mode } from "@/lib/sim";
 import { useSim } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ const MODES: Mode[] = ["shadow", "paper", "live"];
 export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const hour = useSim((s) => s.hour);
+  const ts = useSim((s) => s.ts);
   const regime = useSim((s) => s.regime);
   const running = useSim((s) => s.running);
   const speed = useSim((s) => s.speed);
@@ -52,6 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const kill = useSim((s) => s.kill);
   const resume = useSim((s) => s.resume);
   const reset = useSim((s) => s.reset);
+  const session = nseSessionNow();
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
@@ -60,7 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <p className="font-display text-2xl italic leading-none tracking-tight">
             Nightwatch
           </p>
-          <p className="mt-2 text-xs text-muted-foreground">Paper desk</p>
+          <p className="mt-2 text-xs text-muted-foreground">NSE paper desk</p>
         </Link>
         <nav className="mt-8 flex flex-1 flex-col gap-1">
           {NAV.map((item) => {
@@ -104,8 +107,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="hidden items-center gap-3 md:flex">
             <span className="font-mono text-xs text-muted-foreground tabular-nums">
-              {simClock(hour)}
+              {simClock(hour, ts)}
             </span>
+            <span className="text-muted-foreground/40">/</span>
+            <Badge variant={session.open ? "up" : "mute"}>{session.label}</Badge>
             <span className="text-muted-foreground/40">/</span>
             <Badge variant={killed ? "down" : regimeBadge(regime)}>
               {killed ? "Killed" : REGIME_META[regime].short}

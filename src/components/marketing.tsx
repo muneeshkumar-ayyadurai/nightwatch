@@ -9,7 +9,7 @@ import {
   maxDrawdown,
 } from "@/lib/sim";
 import { readWaitlist, writeWaitlist } from "@/lib/prefs";
-import { usd } from "@/lib/format";
+import { inr } from "@/lib/format";
 import { useSim } from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           <div>
             <p className="font-display text-xl italic">Nightwatch</p>
             <p className="mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
-              Simulated paper market. Not a broker, not an offer of securities,
+              NSE cash tape. Not a broker, not an offer of securities,
               not investment advice. Live capital is a waitlist, not a button.
             </p>
           </div>
@@ -75,15 +75,16 @@ function Hero() {
     <section className="mx-auto grid max-w-6xl gap-10 px-4 py-12 md:grid-cols-2 md:items-center md:px-8 md:py-20">
       <div>
         <p className="text-xs tracking-wide text-muted-foreground uppercase">
-          One-person fund OS · paper
+          One-person fund OS · NSE paper
         </p>
         <h1 className="mt-4 font-display text-5xl leading-none italic tracking-tight sm:text-6xl">
           The highest-leverage tool is not a better strategy.
         </h1>
         <p className="mt-6 max-w-md text-base leading-relaxed text-muted-foreground">
           Nightwatch is the weather report that tells you when the current one
-          is about to stop working. Ornstein–Uhlenbeck on KO/PEP, gated by six
-          regime signals, with a kill switch that actually flattens.
+          is about to stop working. Ornstein–Uhlenbeck on NSE cash pairs —
+          HDFC/ICICI, HUL/ITC, TCS/INFY — gated by India VIX, G-Sec, and
+          Nifty–Bank Nifty, with a kill switch that actually flattens.
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <Button asChild size="lg">
@@ -115,13 +116,13 @@ function LiveCard() {
   return (
     <div className="rounded-2xl bg-card p-4 text-card-foreground shadow-[var(--shadow-border)] sm:p-5">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">Live paper tape</p>
+        <p className="text-xs text-muted-foreground">Live NSE tape</p>
         <Badge variant={regimeBadge(regime)}>{REGIME_META[regime].short}</Badge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div>
           <p className="text-xs text-muted-foreground">Regime book</p>
-          <p className="mt-1 font-mono text-xl tabular-nums">{usd(fe)}</p>
+          <p className="mt-1 font-mono text-xl tabular-nums">{inr(fe)}</p>
           <p className="mt-1 text-sm">
             <PnL n={fe - INITIAL_EQUITY} />
           </p>
@@ -129,7 +130,7 @@ function LiveCard() {
         <div>
           <p className="text-xs text-muted-foreground">Always-on OU</p>
           <p className="mt-1 font-mono text-xl tabular-nums text-muted-foreground">
-            {usd(ne)}
+            {inr(ne)}
           </p>
           <p className="mt-1 text-sm">
             <PnL n={ne - INITIAL_EQUITY} />
@@ -356,11 +357,11 @@ export function MethodView() {
           {[
             {
               t: "One pair first",
-              d: "KO/PEP, dollar-neutral log-spread, OU mean reversion. No market-making, no order-flow, no vol surface until this book is honest.",
+              d: "HDFCBANK/ICICIBANK first, then HUL/ITC and TCS/INFY. Rupee-neutral log-spread, OU mean reversion on the NSE cash book.",
             },
             {
               t: "Six signals, not a story",
-              d: "Hurst, VIX term structure, realized vs implied, cross-asset correlation, credit spreads, the 10y–2y. Classifier is a threshold stack, not a narrative.",
+              d: "Hurst of the spread, India VIX, Nifty realized vs implied, Nifty–Bank Nifty correlation, India 5y CDS, G-Sec 10y–2y.",
             },
             {
               t: "The naive book is the control",

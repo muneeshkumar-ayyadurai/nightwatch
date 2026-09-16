@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { REGIME_META, REGIME_ORDER, equityOf, type Book } from "@/lib/sim";
-import { pct, usd, usdSigned } from "@/lib/format";
+import { REGIME_META, REGIME_ORDER, INITIAL_EQUITY, equityOf, type Book } from "@/lib/sim";
+import { NSE_PAIRS, pairOf } from "@/lib/nse";
+import { pct, inr, inrSigned } from "@/lib/format";
 import { useSim } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +39,7 @@ export function Panel({
 
 export function PnL({ n, digits = 0 }: { n: number; digits?: 0 | 2 }) {
   const tone = n > 0.5 ? "text-up" : n < -0.5 ? "text-down" : "text-muted-foreground";
-  return <span className={cn("font-mono tabular-nums", tone)}>{usdSigned(n, digits)}</span>;
+  return <span className={cn("font-mono tabular-nums", tone)}>{inrSigned(n, digits)}</span>;
 }
 
 export function Pct({ n }: { n: number }) {
@@ -74,7 +75,7 @@ function Briefing() {
     <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
       Morning note. Classifier is {REGIME_META[regime].label.toLowerCase()}.
       Filter is {filterOn ? "on" : "off"}. Regime book{" "}
-      <PnL n={fe - 100_000} /> vs always-on <PnL n={ne - 100_000} />. The
+      <PnL n={fe - INITIAL_EQUITY} /> vs always-on <PnL n={ne - INITIAL_EQUITY} />. The
       always-on book is the control — the version of you that never sits down.
     </p>
   );
@@ -121,6 +122,42 @@ export function ForceRegime() {
   );
 }
 
+export function PairPicker() {
+  const pairId = useSim((s) => s.pairId);
+  const setPair = useSim((s) => s.setPair);
+  const feedStatus = useSim((s) => s.feedStatus);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1.5">
+        {NSE_PAIRS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setPair(p.id)}
+            className={cn(
+              "h-11 rounded-md px-3 text-xs transition-colors duration-(--motion-quick) sm:h-8",
+              pairId === p.id
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground shadow-[var(--shadow-border)] hover:text-foreground",
+            )}
+          >
+            {p.a.symbol}/{p.b.symbol}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {pairOf(pairId).sector}
+        {" · "}
+        {feedStatus === "nse"
+          ? "NSE 1h tape, paper forward"
+          : feedStatus === "loading"
+            ? "Fetching NSE 1h…"
+            : "Simulated tape · feed offline"}
+      </p>
+    </div>
+  );
+}
+
 export function DeskView() {
   const history = useSim((s) => s.history);
   const filtered = useSim((s) => s.filtered);
@@ -134,23 +171,28 @@ export function DeskView() {
   const alerts = useSim((s) => s.alerts);
   const force = useSim((s) => s.forceRegime);
   const killed = useSim((s) => s.killed);
+  const pairId = useSim((s) => s.pairId);
+  const pair = pairOf(pairId);
 
   const fe = equityOf(filtered, ko, pep);
   const ne = equityOf(naive, ko, pep);
-  const fp = fe - 100_000;
-  const np = ne - 100_000;
+  const fp = fe - INITIAL_EQUITY;
+  const np = ne - INITIAL_EQUITY;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs tracking-wide text-muted-foreground uppercase">
-            Paper desk
+            NSE paper desk
           </p>
           <h1 className="mt-1 font-display text-4xl leading-none italic sm:text-5xl">
             The strategy is not the edge.
           </h1>
           <Briefing />
+          <div className="mt-4">
+            <PairPicker />
+          </div>
         </div>
         <ForceRegime />
       </header>
@@ -172,19 +214,19 @@ export function DeskView() {
         <div className="rounded-2xl bg-card p-4 shadow-[var(--shadow-border)]">
           <p className="text-xs text-muted-foreground">Regime book</p>
           <p className="mt-2 font-mono text-2xl tabular-nums tracking-tight">
-            {usd(fe)}
+            {inr(fe)}
           </p>
           <p className="mt-1 text-sm">
-            <PnL n={fp} /> <Pct n={fp / 100_000} />
+            <PnL n={fp} /> <Pct n={fp / INITIAL_EQUITY} />
           </p>
         </div>
         <div className="rounded-2xl bg-card p-4 shadow-[var(--shadow-border)]">
           <p className="text-xs text-muted-foreground">Always-on OU</p>
           <p className="mt-2 font-mono text-2xl tabular-nums tracking-tight text-muted-foreground">
-            {usd(ne)}
+            {inr(ne)}
           </p>
           <p className="mt-1 text-sm">
-            <PnL n={np} /> <Pct n={np / 100_000} />
+            <PnL n={np} /> <Pct n={np / INITIAL_EQUITY} />
           </p>
         </div>
         <div className="rounded-2xl bg-card p-4 shadow-[var(--shadow-border)]">
@@ -202,12 +244,14 @@ export function DeskView() {
           </p>
         </div>
         <div className="rounded-2xl bg-card p-4 shadow-[var(--shadow-border)]">
-          <p className="text-xs text-muted-foreground">KO / PEP</p>
+          <p className="text-xs text-muted-foreground">
+            {pair.a.symbol} / {pair.b.symbol}
+          </p>
           <p className="mt-2 font-mono text-2xl tabular-nums tracking-tight">
             {ko.toFixed(2)}
           </p>
           <p className="mt-1 font-mono text-sm text-muted-foreground tabular-nums">
-            PEP {pep.toFixed(2)}
+            {pair.b.symbol} {pep.toFixed(2)}
           </p>
         </div>
       </div>
@@ -251,7 +295,7 @@ export function DeskView() {
 
       <div className="grid gap-4 lg:grid-cols-5">
         <Panel title="Pair tape" className="lg:col-span-3">
-          <PairChart data={history} />
+          <PairChart data={history} a={pair.a.symbol} b={pair.b.symbol} />
           <div className="mt-4">
             <p className="mb-2 text-xs text-muted-foreground">Log-spread z-score</p>
             <ZChart data={history} />
@@ -335,7 +379,7 @@ function BookRow({
             label="Side"
             value={pos.side === "long_spread" ? "Long spread" : "Short spread"}
           />
-          <Meta label="Notional" value={usd(pos.notional)} />
+          <Meta label="Notional" value={inr(pos.notional)} />
           <Meta label="Entry z" value={pos.zEntry.toFixed(2)} />
           <Meta label="Open P&L" value={<PnL n={mtm} />} />
         </div>

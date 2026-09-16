@@ -16,7 +16,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Nightwatch is a paper trading desk with regime intelligence. The product is the gate that tells you when the strategy is about to stop working.",
+          "Nightwatch NSE paper desk. Regime-gated stat-arb on Indian cash pairs — HDFC/ICICI, HUL/ITC, TCS/INFY — on a live 1-hour tape.",
       },
       { name: "theme-color", content: "#0a0b0d" },
     ],
