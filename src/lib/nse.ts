@@ -91,6 +91,15 @@ export interface NseTape {
   bars: NseBar[];
   last: NseBar;
   fetchedAt: number;
+  history90?: {
+    hurst: number;
+    vixTerm: number;
+    rvIv: number;
+    correlation: number;
+    credit: number;
+    curve: number;
+  }[];
+  lastDay?: string;
 }
 
 export function advanceNseTs(ts: number): number {

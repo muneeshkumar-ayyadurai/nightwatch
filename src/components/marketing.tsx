@@ -220,7 +220,7 @@ function Signals() {
 
 const PIPE = [
   { n: "01", t: "Data", d: "Prices, vol, credit, the curve. Clean history, then the live clock." },
-  { n: "02", t: "Signals", d: "Six gauges, ninety-hour normalization. No opinions in the stack." },
+  { n: "02", t: "Signals", d: "Six gauges, ninety-session z-score. No opinions in the stack." },
   { n: "03", t: "Regime", d: "Crisis, high vol, trend, or mean-rev. The classifier reads gauges, not the hidden state." },
   { n: "04", t: "Strategy", d: "Start with OU. Avellaneda–Stoikov, Hawkes, and Heston stay locked until this one is proven." },
   { n: "05", t: "Risk", d: "Half-Kelly, daily-loss cap, drawdown cap. Flatten on crisis." },

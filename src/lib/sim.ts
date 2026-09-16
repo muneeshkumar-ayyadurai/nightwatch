@@ -1,13 +1,27 @@
 import {
   DEFAULT_PAIR_ID,
+  LEG_CHARGE,
   SESSION_HOURS,
   advanceNseTs,
+  nseTick,
+  nseSessionNow,
   pairOf,
   signalsFromNse,
+  type NseBar,
   type NsePair,
   type NseTape,
 } from "@/lib/nse";
+import {
+  cloneEngine,
+  createEngine,
+  emptyScores,
+  emptySignals,
+  observe,
+  type EngineState,
+  type Signals,
+} from "@/lib/regime-engine";
 
+export type { Signals };
 export type RegimeId = "mean_reverting" | "trending" | "high_vol" | "crisis";
 export type Side = "long_spread" | "short_spread";
 export type CloseReason = "target" | "stop" | "time" | "regime" | "kill" | "risk";
@@ -58,15 +72,6 @@ export const MAX_HOLD_HOURS = 48;
 export const SPREAD_WINDOW = 90;
 export const HISTORY_CAP = 360;
 export const BOOTSTRAP_HOURS = 168;
-
-export interface Signals {
-  hurst: number;
-  vixTerm: number;
-  rvIv: number;
-  correlation: number;
-  credit: number;
-  curve: number;
-}
 
 export interface Position {
   side: Side;
@@ -119,6 +124,7 @@ export interface Point {
   filtered: number;
   naive: number;
   regime: RegimeId;
+  src: "nse" | "sim";
 }
 
 export interface SimState {
@@ -128,6 +134,9 @@ export interface SimState {
   n: number;
   pairId: string;
   tape: "nse" | "sim";
+  lastNseTs: number;
+  niftyBuf: number[];
+  bankBuf: number[];
   ko: number;
   pep: number;
   spread: number;
@@ -135,7 +144,14 @@ export interface SimState {
   spreadMean: number;
   spreadStd: number;
   spreadBuf: number[];
+  vix: number;
   signals: Signals;
+  signalZ: Signals;
+  scores: Record<RegimeId, number>;
+  confidence: number;
+  classified: RegimeId;
+  engineN: number;
+  engine: EngineState;
   latent: RegimeId;
   regime: RegimeId;
   latentLeft: number;
@@ -157,41 +173,6 @@ export interface SimState {
   nextId: number;
   lastRegime: RegimeId;
 }
-
-const TARGETS: Record<RegimeId, Signals> = {
-  mean_reverting: {
-    hurst: 0.37,
-    vixTerm: 0.82,
-    rvIv: -0.18,
-    correlation: 0.22,
-    credit: 78,
-    curve: 0.48,
-  },
-  trending: {
-    hurst: 0.64,
-    vixTerm: 0.28,
-    rvIv: 0.12,
-    correlation: 0.48,
-    credit: 96,
-    curve: 0.12,
-  },
-  high_vol: {
-    hurst: 0.51,
-    vixTerm: -0.42,
-    rvIv: 0.62,
-    correlation: 0.66,
-    credit: 148,
-    curve: -0.08,
-  },
-  crisis: {
-    hurst: 0.58,
-    vixTerm: -1.18,
-    rvIv: 1.35,
-    correlation: 0.93,
-    credit: 238,
-    curve: -0.62,
-  },
-};
 
 function mulberry(seed: number, n: number): number {
   let a = (seed + Math.imul(n, 0x9e3779b9)) >>> 0;
@@ -232,17 +213,9 @@ function emptyBook(id: Book["id"]): Book {
   };
 }
 
-function emptySignals(): Signals {
-  return { ...TARGETS.mean_reverting };
-}
-
 export function classify(sig: Signals): RegimeId {
-  if (sig.credit > 190 || sig.correlation > 0.86 || sig.vixTerm < -0.85) {
-    return "crisis";
-  }
-  if (sig.rvIv > 0.48 || sig.vixTerm < -0.18) return "high_vol";
-  if (sig.hurst > 0.55) return "trending";
-  return "mean_reverting";
+  const { snap } = observe(createEngine(), sig, Date.now());
+  return snap.regime;
 }
 
 function durationFor(s: SimState, regime: RegimeId): number {
@@ -333,10 +306,22 @@ function pushAlert(
   if (s.alerts.length > 36) s.alerts.splice(0, s.alerts.length - 36);
 }
 
+function cashCharges(aNotional: number, bNotional: number): number {
+  return (Math.abs(aNotional) + Math.abs(bNotional)) * LEG_CHARGE;
+}
+
+function inrShort(n: number) {
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
+
 function closePos(s: SimState, book: Book, reason: CloseReason) {
   const pos = book.position;
   if (!pos) return;
-  const pnl = mtm(pos, s.ko, s.pep);
+  const fee = cashCharges(
+    Math.abs(pos.koShares * s.ko),
+    Math.abs(pos.pepShares * s.pep),
+  );
+  const pnl = mtm(pos, s.ko, s.pep) - fee;
   book.realized += pnl;
   book.trades.push({
     id: s.nextId++,
@@ -363,11 +348,12 @@ function closePos(s: SimState, book: Book, reason: CloseReason) {
             : reason === "time"
               ? "Time stop"
               : "Target hit";
+  const pair = pairOf(s.pairId);
   pushAlert(
     s,
     pnl < -400 || reason === "kill" || reason === "regime" ? "warn" : "info",
     `${who}: ${verb}`,
-    `${pos.side === "long_spread" ? "Long" : "Short"} ${pairOf(s.pairId).a.symbol}/${pairOf(s.pairId).b.symbol}  ·  ${pnl >= 0 ? "+" : "−"}₹${Math.abs(pnl).toFixed(0)}`,
+    `${pos.side === "long_spread" ? "Long" : "Short"} ${pair.a.symbol}/${pair.b.symbol}  ·  ${pnl >= 0 ? "+" : "−"}₹${Math.abs(pnl).toFixed(0)}`,
   );
 }
 
@@ -382,13 +368,20 @@ function maybeEnter(s: SimState, book: Book, allow: boolean) {
   const floor = Math.min(MIN_NOTIONAL, cap);
   const notional = clamp(k * eq, floor, cap);
   const side: Side = s.z > 0 ? "short_spread" : "long_spread";
+  const aPx = nseTick(s.ko);
+  const bPx = nseTick(s.pep);
+  const aShares = Math.max(1, Math.round(notional / aPx));
+  const bShares = Math.max(1, Math.round((aShares * aPx) / bPx));
+  const aNotional = aShares * aPx;
+  const bNotional = bShares * bPx;
+  book.realized -= cashCharges(aNotional, bNotional);
   book.position = {
     side,
-    notional,
-    koShares: notional / s.ko,
-    pepShares: notional / s.pep,
-    koEntry: s.ko,
-    pepEntry: s.pep,
+    notional: aNotional,
+    koShares: aShares,
+    pepShares: bShares,
+    koEntry: aPx,
+    pepEntry: bPx,
     zEntry: s.z,
     openedAt: s.hour,
   };
@@ -397,12 +390,8 @@ function maybeEnter(s: SimState, book: Book, allow: boolean) {
     s,
     "info",
     `${who}: ${side === "long_spread" ? "Long" : "Short"} spread`,
-    `z ${s.z.toFixed(2)}  ·  ${inrShort(notional)} notional`,
+    `z ${s.z.toFixed(2)}  ·  ${aShares} ${pairOf(s.pairId).a.symbol} / ${bShares} ${pairOf(s.pairId).b.symbol}  ·  ${inrShort(aNotional)}`,
   );
-}
-
-function inrShort(n: number) {
-  return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
 function manage(s: SimState, book: Book, filter: boolean) {
@@ -461,37 +450,54 @@ function manage(s: SimState, book: Book, filter: boolean) {
   maybeEnter(s, book, canEnter);
 }
 
-function lerpSignals(s: SimState) {
-  const target = TARGETS[s.latent];
-  const a = s.forceRegime ? 0.42 : 0.16;
-  const noise = s.latent === "crisis" ? 0.15 : 0.45;
-  const n = (k: number) => gauss(s) * k * noise;
-  s.signals = {
-    hurst: clamp(
-      s.signals.hurst + a * (target.hurst - s.signals.hurst) + n(0.02),
-      0.2,
-      0.85,
-    ),
-    vixTerm: s.signals.vixTerm + a * (target.vixTerm - s.signals.vixTerm) + n(0.08),
-    rvIv: s.signals.rvIv + a * (target.rvIv - s.signals.rvIv) + n(0.06),
-    correlation: clamp(
-      s.signals.correlation +
-        a * (target.correlation - s.signals.correlation) +
-        n(0.03),
-      0.05,
-      0.99,
-    ),
-    credit: clamp(
-      s.signals.credit + a * (target.credit - s.signals.credit) + n(4),
-      40,
-      320,
-    ),
-    curve: s.signals.curve + a * (target.curve - s.signals.curve) + n(0.03),
-  };
+function applyEngine(s: SimState, tsMs: number) {
+  const { engine, snap } = observe(s.engine, s.signals, tsMs);
+  s.engine = engine;
+  s.signalZ = snap.z;
+  s.scores = snap.scores;
+  s.confidence = snap.confidence;
+  s.classified = snap.regime;
+  s.engineN = snap.nObs;
+  s.regime = s.forceRegime ?? snap.regime;
+  if (s.regime !== s.lastRegime) {
+    pushAlert(
+      s,
+      s.regime === "crisis" ? "crit" : s.regime === "high_vol" ? "warn" : "info",
+      s.forceRegime
+        ? `Forced → ${REGIME_META[s.regime].label}`
+        : `Regime → ${REGIME_META[s.regime].label}  (90d z, ${snap.nObs}/${snap.window})`,
+      REGIME_META[s.regime].blurb,
+    );
+    s.lastRegime = s.regime;
+  }
+}
+
+function stepFactors(s: SimState) {
+  const regime = s.latent;
+  const vixT =
+    regime === "crisis" ? 26 : regime === "high_vol" ? 17.6 : regime === "trending" ? 14.2 : 12.3;
+  s.vix = clamp(
+    s.vix + 0.18 * (vixT - s.vix) + gauss(s) * (regime === "crisis" ? 0.85 : 0.22),
+    9,
+    42,
+  );
+  const lastN = s.niftyBuf[s.niftyBuf.length - 1] ?? 24800;
+  const lastB = s.bankBuf[s.bankBuf.length - 1] ?? 55600;
+  const vol = regime === "crisis" ? 0.012 : regime === "high_vol" ? 0.007 : 0.0035;
+  const z1 = gauss(s);
+  const rho = regime === "crisis" ? 0.95 : 0.78;
+  const z2 = rho * z1 + Math.sqrt(Math.max(0, 1 - rho * rho)) * gauss(s);
+  const drift = regime === "crisis" ? -0.004 : 0.0002;
+  s.niftyBuf.push(lastN * Math.exp(drift + vol * z1));
+  s.bankBuf.push(lastB * Math.exp(drift + vol * z2));
+  if (s.niftyBuf.length > SPREAD_WINDOW) s.niftyBuf.shift();
+  if (s.bankBuf.length > SPREAD_WINDOW) s.bankBuf.shift();
 }
 
 function stepPrices(s: SimState) {
   const regime = s.latent;
+  const prevK = s.ko;
+  const prevP = s.pep;
   const vol =
     regime === "crisis" ? 0.022 : regime === "high_vol" ? 0.013 : 0.0055;
   const rho =
@@ -514,9 +520,12 @@ function stepPrices(s: SimState) {
   const trendPush =
     regime === "trending" ? 0.0048 * Math.sign(spread - mu || 1) : 0;
   spread += kappa * (mu - spread) + shock + trendPush;
-  s.ko = Math.exp(spread + Math.log(s.pep));
-  s.spread = spread;
-  s.spreadBuf.push(spread);
+  s.ko = nseTick(
+    clamp(Math.exp(spread + Math.log(s.pep)), prevK * 0.95, prevK * 1.05),
+  );
+  s.pep = nseTick(clamp(s.pep, prevP * 0.95, prevP * 1.05));
+  s.spread = Math.log(s.ko) - Math.log(s.pep);
+  s.spreadBuf.push(s.spread);
   if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
   const zs = zscore(s.spreadBuf);
   s.spreadMean = zs.mean;
@@ -524,17 +533,24 @@ function stepPrices(s: SimState) {
   s.z = zs.z;
 }
 
-export function tick(state: SimState): SimState {
-  const s: SimState = {
+function cloneSim(state: SimState): SimState {
+  return {
     ...state,
     signals: { ...state.signals },
+    signalZ: { ...state.signalZ },
+    scores: { ...state.scores },
+    engine: cloneEngine(state.engine),
     spreadBuf: state.spreadBuf.slice(),
+    niftyBuf: state.niftyBuf.slice(),
+    bankBuf: state.bankBuf.slice(),
     history: state.history.slice(),
     alerts: state.alerts.slice(),
     filtered: {
       ...state.filtered,
       trades: state.filtered.trades.slice(),
-      position: state.filtered.position ? { ...state.filtered.position } : null,
+      position: state.filtered.position
+        ? { ...state.filtered.position }
+        : null,
     },
     naive: {
       ...state.naive,
@@ -542,6 +558,58 @@ export function tick(state: SimState): SimState {
       position: state.naive.position ? { ...state.naive.position } : null,
     },
   };
+}
+
+function pushPoint(s: SimState, src: Point["src"]) {
+  s.history.push({
+    t: s.hour,
+    ts: s.ts,
+    ko: s.ko,
+    pep: s.pep,
+    spread: s.spread,
+    z: s.z,
+    filtered: equityOf(s.filtered, s.ko, s.pep),
+    naive: equityOf(s.naive, s.ko, s.pep),
+    regime: s.regime,
+    src,
+  });
+  if (s.history.length > HISTORY_CAP) s.history.shift();
+}
+
+function applyNseBar(s: SimState, bar: NseBar) {
+  s.ko = nseTick(bar.a);
+  s.pep = nseTick(bar.b);
+  s.ts = bar.t * 1000;
+  s.spread = Math.log(s.ko) - Math.log(s.pep);
+  s.spreadBuf.push(s.spread);
+  if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
+  const zs = zscore(s.spreadBuf);
+  s.spreadMean = zs.mean;
+  s.spreadStd = zs.std;
+  s.z = zs.z;
+  s.niftyBuf.push(bar.nifty);
+  s.bankBuf.push(bar.bank);
+  if (s.niftyBuf.length > SPREAD_WINDOW) s.niftyBuf.shift();
+  if (s.bankBuf.length > SPREAD_WINDOW) s.bankBuf.shift();
+  s.signals = signalsFromNse({
+    spreadBuf: s.spreadBuf,
+    vix: bar.vix,
+    nifty: s.niftyBuf,
+    bank: s.bankBuf,
+  });
+  s.vix = bar.vix;
+  applyEngine(s, s.ts);
+  s.latent = s.classified;
+  s.hour += 1;
+  manage(s, s.filtered, true);
+  manage(s, s.naive, false);
+  pushPoint(s, "nse");
+  s.lastNseTs = bar.t;
+  s.tape = "nse";
+}
+
+export function tick(state: SimState): SimState {
+  const s = cloneSim(state);
 
   const prevLatent = s.latent;
   if (s.forceRegime) {
@@ -561,39 +629,21 @@ export function tick(state: SimState): SimState {
     if (s.latent === "high_vol") s.ko *= 1.008;
   }
 
-  lerpSignals(s);
-  s.regime = classify(s.signals);
-
-  if (s.regime !== s.lastRegime) {
-    pushAlert(
-      s,
-      s.regime === "crisis" ? "crit" : s.regime === "high_vol" ? "warn" : "info",
-      `Regime → ${REGIME_META[s.regime].label}`,
-      REGIME_META[s.regime].blurb,
-    );
-    s.lastRegime = s.regime;
-  }
-
   stepPrices(s);
+  stepFactors(s);
+  s.signals = signalsFromNse({
+    spreadBuf: s.spreadBuf,
+    vix: s.vix,
+    nifty: s.niftyBuf,
+    bank: s.bankBuf,
+  });
   s.hour += 1;
   s.ts = advanceNseTs(s.ts);
+  applyEngine(s, s.ts);
 
   manage(s, s.filtered, true);
   manage(s, s.naive, false);
-
-  s.history.push({
-    t: s.hour,
-    ts: s.ts,
-    ko: s.ko,
-    pep: s.pep,
-    spread: s.spread,
-    z: s.z,
-    filtered: equityOf(s.filtered, s.ko, s.pep),
-    naive: equityOf(s.naive, s.ko, s.pep),
-    regime: s.regime,
-  });
-  if (s.history.length > HISTORY_CAP) s.history.shift();
-
+  pushPoint(s, "sim");
   return s;
 }
 
@@ -610,6 +660,9 @@ export function createInitialState(
     n: 0,
     pairId: pair.id,
     tape: "sim",
+    lastNseTs: 0,
+    niftyBuf: [],
+    bankBuf: [],
     ko: pair.a0,
     pep: pair.b0,
     spread: Math.log(pair.a0) - Math.log(pair.b0),
@@ -617,7 +670,14 @@ export function createInitialState(
     spreadMean: 0,
     spreadStd: 0.01,
     spreadBuf: [],
+    vix: 13.2,
     signals: emptySignals(),
+    signalZ: emptySignals(),
+    scores: emptyScores(),
+    confidence: 0,
+    classified: "mean_reverting",
+    engineN: 0,
+    engine: createEngine(),
     latent: "mean_reverting",
     regime: "mean_reverting",
     latentLeft: 44,
@@ -658,60 +718,22 @@ export function createInitialState(
 }
 
 export function playTape(seed: number, tape: NseTape): SimState {
-  let s = createInitialState(seed, tape.pairId, { bootstrap: false });
-  const nifty: number[] = [];
-  const bank: number[] = [];
-  for (const bar of tape.bars) {
-    s.ko = bar.a;
-    s.pep = bar.b;
-    s.ts = bar.t * 1000;
-    s.spread = Math.log(s.ko) - Math.log(s.pep);
-    s.spreadBuf.push(s.spread);
-    if (s.spreadBuf.length > SPREAD_WINDOW) s.spreadBuf.shift();
-    const zs = zscore(s.spreadBuf);
-    s.spreadMean = zs.mean;
-    s.spreadStd = zs.std;
-    s.z = zs.z;
-    nifty.push(bar.nifty);
-    bank.push(bar.bank);
-    if (nifty.length > SPREAD_WINDOW) nifty.shift();
-    if (bank.length > SPREAD_WINDOW) bank.shift();
-    s.signals = signalsFromNse({
-      spreadBuf: s.spreadBuf,
-      vix: bar.vix,
-      nifty,
-      bank,
-    });
-    s.latent = classify(s.signals);
-    s.regime = s.latent;
-    if (s.regime !== s.lastRegime) {
-      pushAlert(
-        s,
-        s.regime === "crisis" ? "crit" : s.regime === "high_vol" ? "warn" : "info",
-        `Regime → ${REGIME_META[s.regime].label}`,
-        REGIME_META[s.regime].blurb,
-      );
-      s.lastRegime = s.regime;
-    }
-    s.hour += 1;
-    manage(s, s.filtered, true);
-    manage(s, s.naive, false);
-    s.history.push({
-      t: s.hour,
-      ts: s.ts,
-      ko: s.ko,
-      pep: s.pep,
-      spread: s.spread,
-      z: s.z,
-      filtered: equityOf(s.filtered, s.ko, s.pep),
-      naive: equityOf(s.naive, s.ko, s.pep),
-      regime: s.regime,
-    });
-    if (s.history.length > HISTORY_CAP) s.history.shift();
-  }
-  s.tape = "nse";
+  const s = createInitialState(seed, tape.pairId, { bootstrap: false });
+  s.engine = createEngine(tape.history90 ?? [], tape.lastDay ?? null);
+  for (const bar of tape.bars) applyNseBar(s, bar);
   s.forceRegime = null;
   s.alerts = s.alerts.slice(-8);
+  s.running = nseSessionNow().open;
+  return s;
+}
+
+export function appendBars(state: SimState, tape: NseTape): SimState {
+  const extra = tape.bars.filter((b) => b.t > (state.lastNseTs || 0));
+  if (!extra.length) return state;
+  const s = cloneSim(state);
+  for (const bar of extra) applyNseBar(s, bar);
+  s.alerts = s.alerts.slice(-8);
+  if (!nseSessionNow().open) s.running = false;
   return s;
 }
 
@@ -725,11 +747,14 @@ export function maxDrawdown(series: number[]): number {
   return max;
 }
 
-export function simSharpe(history: Point[], key: "filtered" | "naive"): number | null {
+export function simSharpe(
+  history: Point[],
+  key: "filtered" | "naive",
+): number | null {
   if (history.length < 48) return null;
   const daily: number[] = [];
   for (let i = SESSION_HOURS; i < history.length; i += SESSION_HOURS) {
-    const prev = history[i - 24]![key];
+    const prev = history[i - SESSION_HOURS]![key];
     const cur = history[i]![key];
     daily.push(cur / prev - 1);
   }
@@ -759,7 +784,7 @@ export const SIGNAL_META: {
     key: "hurst",
     label: "Hurst exponent",
     unit: "H",
-    hint: "H < 0.5 mean-reverts; H > 0.5 trends.",
+    hint: "H < 0.5 mean-reverts; H > 0.5 trends. The engine z-scores this over 90 sessions.",
     format: (v) => v.toFixed(2),
     goodHigh: false,
   },

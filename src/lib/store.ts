@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_PAIR_ID, type NseTape } from "@/lib/nse";
 import {
+  appendBars,
   createInitialState,
   playTape,
   tick,
@@ -24,6 +25,7 @@ interface SimStore extends SimState {
   setPair: (pairId: string) => void;
   markFeedLoading: () => void;
   hydrateFeed: (tape: NseTape) => void;
+  appendFeed: (tape: NseTape) => void;
   kill: () => void;
   resume: () => void;
   reset: () => void;
@@ -70,10 +72,14 @@ export const useSim = create<SimStore>((set, get) => ({
       dailyLoss: prev.dailyLoss,
       filterOn: prev.filterOn,
       autoFlattenCrisis: prev.autoFlattenCrisis,
-      running: prev.running,
       killed: false,
       killReason: null,
     });
+  },
+  appendFeed: (tape) => {
+    const prev = get();
+    if (prev.pairId !== tape.pairId) return;
+    set({ ...appendBars(prev, tape), feedStatus: "nse" });
   },
   kill: () =>
     set((s) =>
@@ -96,7 +102,7 @@ export const useSim = create<SimStore>((set, get) => ({
     const prev = get();
     set({
       ...createInitialState((prev.seed + 41) | 0, prev.pairId || DEFAULT_PAIR_ID),
-      feedStatus: prev.feedStatus === "nse" ? "loading" : "sim",
+      feedStatus: "loading",
       mode: prev.mode,
       speed: prev.speed,
       kellyBlend: prev.kellyBlend,

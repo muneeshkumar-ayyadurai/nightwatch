@@ -37,8 +37,13 @@ export function SimProvider({ children }: { children: ReactNode }) {
     fetchNseTape({ data: { pairId } })
       .then((tape) => {
         if (cancelled) return;
-        if (tape) useSim.getState().hydrateFeed(tape);
-        else useSim.setState({ feedStatus: "sim" });
+        if (tape) {
+          try {
+            useSim.getState().hydrateFeed(tape);
+          } catch {
+            useSim.setState({ feedStatus: "sim" });
+          }
+        } else useSim.setState({ feedStatus: "sim" });
       })
       .catch(() => {
         if (!cancelled) useSim.setState({ feedStatus: "sim" });

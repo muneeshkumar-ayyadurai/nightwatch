@@ -1,43 +1,47 @@
 import { SIGNAL_META, type Signals } from "@/lib/sim";
 import { cn } from "@/lib/utils";
 
-const RANGES: Record<keyof Signals, [number, number]> = {
-  hurst: [0.2, 0.85],
-  vixTerm: [-1.5, 1.2],
-  rvIv: [-0.8, 1.6],
-  correlation: [0, 1],
-  credit: [40, 320],
-  curve: [-0.9, 0.9],
-};
-
-function unit(v: number, lo: number, hi: number) {
-  return Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
-}
-
 export function RegimeGauges({
   signals,
+  z,
   compact = false,
 }: {
   signals: Signals;
+  z?: Signals;
   compact?: boolean;
 }) {
   return (
     <div className={cn("grid gap-3", compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
       {SIGNAL_META.map((meta) => {
         const v = signals[meta.key];
-        const [lo, hi] = RANGES[meta.key];
-        const t = unit(v, lo, hi);
-        const stress = meta.goodHigh ? t < 0.35 : t > 0.7;
+        const zv = z?.[meta.key];
+        const hasZ = zv != null && Number.isFinite(zv);
+        const stress = hasZ
+          ? meta.goodHigh
+            ? zv < -1.25
+            : zv > 1.25
+          : false;
+        const width = hasZ ? Math.abs(zv) / 3 : 0;
+        const left = hasZ && zv < 0 ? 50 - width * 50 : 50;
         return (
           <div key={meta.key} className="rounded-lg bg-secondary/60 px-3 py-3">
             <div className="flex items-baseline justify-between gap-3">
               <p className="text-xs text-muted-foreground">{meta.label}</p>
-              <p className="font-mono text-sm tabular-nums">{meta.format(v)}</p>
+              <p className="font-mono text-sm tabular-nums">
+                {meta.format(v)}
+                {hasZ ? (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    z {zv >= 0 ? "+" : ""}
+                    {zv.toFixed(2)}
+                  </span>
+                ) : null}
+              </p>
             </div>
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-background">
+            <div className="relative mt-2 h-1 overflow-hidden rounded-full bg-background">
+              <span className="absolute top-0 left-1/2 h-full w-px bg-border" />
               <div
-                className={cn("h-full rounded-full", stress ? "bg-down" : "bg-primary")}
-                style={{ width: `${Math.round(t * 100)}%` }}
+                className={cn("absolute top-0 h-full rounded-full", stress ? "bg-down" : "bg-primary")}
+                style={{ left: `${left}%`, width: `${Math.round(width * 50)}%` }}
               />
             </div>
             {!compact ? (

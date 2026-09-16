@@ -73,8 +73,8 @@ function Briefing() {
   const ne = equityOf(naive, ko, pep);
   return (
     <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-      Morning note. Classifier is {REGIME_META[regime].label.toLowerCase()}.
-      Filter is {filterOn ? "on" : "off"}. Regime book{" "}
+      Morning note. Classifier is {REGIME_META[regime].label.toLowerCase()} on a
+      90-session z-score. Filter is {filterOn ? "on" : "off"}. Regime book{" "}
       <PnL n={fe - INITIAL_EQUITY} /> vs always-on <PnL n={ne - INITIAL_EQUITY} />. The
       always-on book is the control — the version of you that never sits down.
     </p>
@@ -166,6 +166,7 @@ export function DeskView() {
   const pep = useSim((s) => s.pep);
   const z = useSim((s) => s.z);
   const signals = useSim((s) => s.signals);
+  const signalZ = useSim((s) => s.signalZ);
   const filterOn = useSim((s) => s.filterOn);
   const setFilterOn = useSim((s) => s.setFilterOn);
   const alerts = useSim((s) => s.alerts);
@@ -301,8 +302,8 @@ export function DeskView() {
             <ZChart data={history} />
           </div>
         </Panel>
-        <Panel title="Six signals" className="lg:col-span-2">
-          <RegimeGauges signals={signals} compact />
+        <Panel title="Six signals · 90d z" className="lg:col-span-2">
+          <RegimeGauges signals={signals} z={signalZ} compact />
         </Panel>
       </div>
 
