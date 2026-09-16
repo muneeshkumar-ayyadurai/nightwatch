@@ -66,6 +66,12 @@ export const DEFAULT_PAIR_ID = "hdfc-icici";
 export const SESSION_HOURS = 6;
 export const NSE_OPEN_MIN = 9 * 60 + 15;
 export const NSE_CLOSE_MIN = 15 * 60 + 30;
+export const NSE_TICK = 0.05;
+export const LEG_CHARGE = 0.0005;
+
+export function nseTick(px: number): number {
+  return Math.round(px / NSE_TICK) * NSE_TICK;
+}
 
 export function pairOf(id: string | undefined | null): NsePair {
   return NSE_PAIRS.find((p) => p.id === id) ?? NSE_PAIRS[0]!;
