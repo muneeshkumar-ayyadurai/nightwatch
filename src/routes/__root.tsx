@@ -16,7 +16,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "24/7 paper trading desk with regime intelligence. Ornstein–Uhlenbeck stat-arb that knows when to stand aside.",
+          "Nightwatch is a paper trading desk with regime intelligence. The product is the gate that tells you when the strategy is about to stop working.",
       },
       { name: "theme-color", content: "#0a0b0d" },
     ],

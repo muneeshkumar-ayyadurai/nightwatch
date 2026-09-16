@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const NAV = [
-  { to: "/", label: "Desk", icon: LayoutGrid },
+  { to: "/desk", label: "Desk", icon: LayoutGrid },
   { to: "/regimes", label: "Regime", icon: Activity },
   { to: "/strategy", label: "Strategy", icon: LineChart },
   { to: "/risk", label: "Risk", icon: Shield },
@@ -56,11 +56,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border px-4 py-6 md:flex">
-        <Link to="/" className="px-2">
+        <Link to="/desk" className="px-2">
           <p className="font-display text-2xl italic leading-none tracking-tight">
             Nightwatch
           </p>
-          <p className="mt-2 text-xs text-muted-foreground">Regime desk</p>
+          <p className="mt-2 text-xs text-muted-foreground">Paper desk</p>
         </Link>
         <nav className="mt-8 flex flex-1 flex-col gap-1">
           {NAV.map((item) => {
@@ -83,14 +83,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <p className="px-2 text-xs leading-relaxed text-muted-foreground">
-          Simulated paper market. Not a broker. Not advice.
-        </p>
+        <div className="px-2">
+          <Link
+            to="/"
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Product home
+          </Link>
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            Simulated paper market. Not a broker. Not advice.
+          </p>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/90 px-4 py-3 backdrop-blur-sm md:px-6">
-          <Link to="/" className="md:hidden">
+          <Link to="/desk" className="md:hidden">
             <p className="font-display text-xl italic leading-none">Nightwatch</p>
           </Link>
 

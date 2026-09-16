@@ -1,30 +1,24 @@
 # Nightwatch
 
-A paper trading desk with **regime intelligence**. Same Ornstein–Uhlenbeck KO/PEP book, two ledgers: one gated by a six-signal classifier, one always-on.
+Paper trading desk with regime intelligence. The product is not a better strategy — it is the weather report that tells you when the current one is about to stop working.
 
-The point of the desk is not a better strategy. It is the weather report that tells you when the current one is about to stop working.
+**Paper is live. Live capital is a waitlist.**
 
-## What’s on the desk
+## Product
 
-- Live simulated KO/PEP statistical-arbitrage tape
-- Six regime gauges: Hurst, VIX term, realized vs implied, cross-asset correlation, credit spreads, rates curve
-- Classifier: mean-reverting / trending / high-vol / crisis
-- Regime book vs always-on OU equity overlay
-- Kelly sizing, drawdown cap, daily-loss cap, kill switch
-- Locked Phase-6 engines: Avellaneda–Stoikov, Hawkes, Heston
+- Marketing site with a live paper tape
+- Desk: KO/PEP Ornstein–Uhlenbeck, regime book vs always-on control
+- Six-signal classifier (Hurst, VIX term, RV−IV, correlation, credit, curve)
+- Risk: Kelly blend, drawdown cap, daily-loss cap, flatten-on-crisis, kill switch
+- Method: the rules the desk is held to
 
-Simulated paper market. Not a broker. Not advice.
+Simulated market. Not a broker. Not advice.
 
-## Run it
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open the app on port 8080.
-
-```bash
-npm run build
-npm run typecheck
-```
+Open the app on port 8080. `npm run build` and `npm run typecheck` before you ship.

@@ -61,6 +61,25 @@ export function Stat({
   );
 }
 
+function Briefing() {
+  const regime = useSim((s) => s.regime);
+  const filterOn = useSim((s) => s.filterOn);
+  const filtered = useSim((s) => s.filtered);
+  const naive = useSim((s) => s.naive);
+  const ko = useSim((s) => s.ko);
+  const pep = useSim((s) => s.pep);
+  const fe = equityOf(filtered, ko, pep);
+  const ne = equityOf(naive, ko, pep);
+  return (
+    <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
+      Morning note. Classifier is {REGIME_META[regime].label.toLowerCase()}.
+      Filter is {filterOn ? "on" : "off"}. Regime book{" "}
+      <PnL n={fe - 100_000} /> vs always-on <PnL n={ne - 100_000} />. The
+      always-on book is the control — the version of you that never sits down.
+    </p>
+  );
+}
+
 export function ForceRegime() {
   const force = useSim((s) => s.forceRegime);
   const setForce = useSim((s) => s.setForceRegime);
@@ -126,15 +145,12 @@ export function DeskView() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs tracking-wide text-muted-foreground uppercase">
-            One-person fund · paper
+            Paper desk
           </p>
           <h1 className="mt-1 font-display text-4xl leading-none italic sm:text-5xl">
             The strategy is not the edge.
           </h1>
-          <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
-            Ornstein–Uhlenbeck on KO/PEP, gated by six regime signals. The
-            always-on book trades the same spread with no weather report.
-          </p>
+          <Briefing />
         </div>
         <ForceRegime />
       </header>
