@@ -1,6 +1,7 @@
 {
   "framework": "tanstack-start",
   "env": {
+    "VITE_AUTH_ENABLED": "false",
     "BETTER_AUTH_TRUSTED_ORIGINS": "https://*.vercel.app,https://grok.com,https://www.grok.com,https://*.grok.com"
   }
 }
