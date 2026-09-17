@@ -24,6 +24,7 @@ export interface PairFit {
   hlMean: number | null;
   hlCv: number | null;
   kappaMean: number | null;
+  kappaCv: number | null;
   r2Mean: number | null;
   r2Min: number | null;
 }
@@ -70,6 +71,7 @@ export function scorePair(report: ValidationReport): PairResearch {
   const selected = selectedFolds.length;
   const betaCv = cv(report.stability?.beta);
   const hlCv = cv(report.stability?.halfLife);
+  const kappaCv = cv(report.stability?.kappa);
   const r2Mean = report.stability?.r2?.mean ?? null;
   const r2Min = report.stability?.r2?.min ?? null;
   const betaMean = report.stability?.beta?.mean ?? null;
@@ -110,6 +112,7 @@ export function scorePair(report: ValidationReport): PairResearch {
 
   if (hlMean != null && hlMean >= 2 && hlMean <= 15) score += 8;
   else if (hlMean != null) reasons.push("half-life outside 2–15d");
+  if (hlCv != null && hlCv > 0.35) reasons.push("half-life varies across folds");
 
   const withTrades = selectedFolds.filter(
     (f) => f.oos.filtered.trades + f.oos.naive.trades > 0,
@@ -189,6 +192,7 @@ export function scorePair(report: ValidationReport): PairResearch {
       hlMean,
       hlCv,
       kappaMean,
+      kappaCv,
       r2Mean,
       r2Min,
     },

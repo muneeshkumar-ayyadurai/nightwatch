@@ -122,6 +122,7 @@ function UniverseBody({
                 <th className="pb-2 text-right font-medium">β</th>
                 <th className="pb-2 text-right font-medium">β cv</th>
                 <th className="pb-2 text-right font-medium">hl</th>
+                <th className="pb-2 text-right font-medium">κ</th>
                 <th className="pb-2 text-right font-medium">R²</th>
                 <th className="pb-2 text-right font-medium">OOS gated</th>
                 <th className="pb-2 text-right font-medium">OOS naive</th>
@@ -162,6 +163,9 @@ function UniverseBody({
                     </td>
                     <td className="py-2 text-right font-mono tabular-nums">
                       {c.pairFit.hlMean == null ? "—" : `${c.pairFit.hlMean.toFixed(1)}d`}
+                    </td>
+                    <td className="py-2 text-right font-mono tabular-nums">
+                      {fmtN(c.pairFit.kappaMean, 0)}
                     </td>
                     <td className="py-2 text-right font-mono tabular-nums">
                       {fmtN(c.pairFit.r2Mean, 2)}
