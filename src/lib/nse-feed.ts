@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import {
   DEFAULT_PAIR_ID,
+  NSE_PAIRS,
   dataIntegrity,
   pairOf,
   signalsFromNse,
@@ -8,6 +9,7 @@ import {
   type NseTape,
 } from "@/lib/nse";
 import { istDayKey, type Signals } from "@/lib/regime-engine";
+import { rankUniverse, type UniverseReport } from "@/lib/research";
 import { validateOu, type ValidationReport } from "@/lib/validate-ou";
 
 interface YahooChart {
@@ -245,3 +247,58 @@ export const fetchNseTape = createServerFn({ method: "POST" })
       return null;
     }
   });
+
+let uniCache: { at: number; report: UniverseReport | null } = {
+  at: 0,
+  report: null,
+};
+
+export const fetchResearchReport = createServerFn({ method: "POST" }).handler(
+  async (): Promise<UniverseReport | null> => {
+    if (uniCache.report && Date.now() - uniCache.at < TTL) return uniCache.report;
+    try {
+      const macrosP = Promise.all([
+        yahooSoft("^INDIAVIX", "1d", "2y"),
+        yahooSoft("^NSEI", "1d", "2y"),
+        yahooSoft("^NSEBANK", "1d", "2y"),
+        yahooSoft("INR=X", "1d", "2y"),
+        yahooSoft("GILT5YBEES.NS", "1d", "2y"),
+        yahooSoft("LTGILTBEES.NS", "1d", "2y"),
+      ]);
+      const legsP = Promise.all(
+        NSE_PAIRS.flatMap((p) => [
+          yahoo(p.a.yahoo, "1d", "2y"),
+          yahoo(p.b.yahoo, "1d", "2y"),
+        ]),
+      );
+      const packed = await settle(Promise.all([macrosP, legsP]), 18000);
+      if (!packed) return uniCache.report;
+      const [macros, legs] = packed;
+      const [vix, nifty, bank, usd, g5, g10] = macros;
+      const reports: ValidationReport[] = [];
+      for (let i = 0; i < NSE_PAIRS.length; i++) {
+        const pair = NSE_PAIRS[i]!;
+        const a = legs[i * 2] ?? EMPTY;
+        const b = legs[i * 2 + 1] ?? EMPTY;
+        const dailyBars = align(
+          a,
+          b,
+          vix,
+          nifty,
+          bank,
+          usd,
+          g5,
+          g10,
+          36 * 3600,
+        );
+        reports.push(validateOu(dailyBars, pair.id));
+      }
+      const report = rankUniverse(reports);
+      uniCache.at = Date.now();
+      uniCache.report = report;
+      return report;
+    } catch {
+      return uniCache.report;
+    }
+  },
+);

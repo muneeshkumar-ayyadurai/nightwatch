@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
+  FlaskConical,
   LayoutGrid,
   Pause,
   Play,
@@ -33,6 +34,7 @@ const NAV = [
   { to: "/desk", label: "Desk", icon: LayoutGrid },
   { to: "/regimes", label: "Regime", icon: Activity },
   { to: "/strategy", label: "Strategy", icon: LineChart },
+  { to: "/research", label: "Research", icon: FlaskConical },
   { to: "/risk", label: "Risk", icon: Shield },
 ] as const;
 
@@ -206,7 +208,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden">
         {NAV.map((item) => {
           const active = path === item.to;
           const Icon = item.icon;

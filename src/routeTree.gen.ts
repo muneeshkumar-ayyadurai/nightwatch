@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DeskRouteImport } from './routes/desk'
 import { Route as MethodRouteImport } from './routes/method'
 import { Route as RegimesRouteImport } from './routes/regimes'
+import { Route as ResearchRouteImport } from './routes/research'
 import { Route as RiskRouteImport } from './routes/risk'
 import { Route as StrategyRouteImport } from './routes/strategy'
 
@@ -36,6 +37,11 @@ const RegimesRoute = RegimesRouteImport.update({
   path: '/regimes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResearchRoute = ResearchRouteImport.update({
+  id: '/research',
+  path: '/research',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RiskRoute = RiskRouteImport.update({
   id: '/risk',
   path: '/risk',
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/desk': typeof DeskRoute
   '/method': typeof MethodRoute
   '/regimes': typeof RegimesRoute
+  '/research': typeof ResearchRoute
   '/risk': typeof RiskRoute
   '/strategy': typeof StrategyRoute
 }
@@ -60,6 +67,7 @@ export interface FileRoutesByTo {
   '/desk': typeof DeskRoute
   '/method': typeof MethodRoute
   '/regimes': typeof RegimesRoute
+  '/research': typeof ResearchRoute
   '/risk': typeof RiskRoute
   '/strategy': typeof StrategyRoute
 }
@@ -69,16 +77,26 @@ export interface FileRoutesById {
   '/desk': typeof DeskRoute
   '/method': typeof MethodRoute
   '/regimes': typeof RegimesRoute
+  '/research': typeof ResearchRoute
   '/risk': typeof RiskRoute
   '/strategy': typeof StrategyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/desk' | '/method' | '/regimes' | '/risk' | '/strategy'
+  fullPaths:
+    '/' | '/desk' | '/method' | '/regimes' | '/research' | '/risk' | '/strategy'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/desk' | '/method' | '/regimes' | '/risk' | '/strategy'
+  to:
+    '/' | '/desk' | '/method' | '/regimes' | '/research' | '/risk' | '/strategy'
   id:
-    '__root__' | '/' | '/desk' | '/method' | '/regimes' | '/risk' | '/strategy'
+    | '__root__'
+    | '/'
+    | '/desk'
+    | '/method'
+    | '/regimes'
+    | '/research'
+    | '/risk'
+    | '/strategy'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -86,6 +104,7 @@ export interface RootRouteChildren {
   DeskRoute: typeof DeskRoute
   MethodRoute: typeof MethodRoute
   RegimesRoute: typeof RegimesRoute
+  ResearchRoute: typeof ResearchRoute
   RiskRoute: typeof RiskRoute
   StrategyRoute: typeof StrategyRoute
 }
@@ -120,6 +139,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegimesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/research': {
+      id: '/research'
+      path: '/research'
+      fullPath: '/research'
+      preLoaderRoute: typeof ResearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/risk': {
       id: '/risk'
       path: '/risk'
@@ -142,6 +168,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeskRoute: DeskRoute,
   MethodRoute: MethodRoute,
   RegimesRoute: RegimesRoute,
+  ResearchRoute: ResearchRoute,
   RiskRoute: RiskRoute,
   StrategyRoute: StrategyRoute,
 }
