@@ -77,6 +77,11 @@ export const Z_ENTRY = 1.75;
 export const Z_EXIT = 0.4;
 export const Z_STOP = 4.2;
 export const MAX_HOLD_HOURS = 48;
+
+export function holdHours(fit: OuFit | null): number {
+  if (!fit || !(fit.halfLife > 0)) return MAX_HOLD_HOURS;
+  return Math.max(6, Math.min(72, Math.round(2 * fit.halfLife * SESSION_HOURS)));
+}
 export const SPREAD_WINDOW = 90;
 export const HISTORY_CAP = 360;
 export const BOOTSTRAP_HOURS = 168;
@@ -479,7 +484,7 @@ function manage(s: SimState, book: Book, filter: boolean) {
       (pos.side === "long_spread" && s.z > -Z_EXIT);
     if (adverse) closePos(s, book, "stop");
     else if (target) closePos(s, book, "target");
-    else if (held >= MAX_HOLD_HOURS) closePos(s, book, "time");
+    else if (held >= holdHours(s.ouFit)) closePos(s, book, "time");
   }
 
   const canEnter =

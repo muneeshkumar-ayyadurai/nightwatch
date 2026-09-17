@@ -69,6 +69,14 @@ export interface RegimeSlice {
   filtered: BookStats;
 }
 
+export interface ParamMoments {
+  n: number;
+  mean: number;
+  std: number;
+  min: number;
+  max: number;
+}
+
 export interface FoldReport {
   i: number;
   trainFrom: number;
@@ -96,6 +104,12 @@ export interface ValidationReport {
   integrity: DataIntegrity;
   folds: FoldReport[];
   selectedFolds: number;
+  stability: {
+    beta: ParamMoments | null;
+    halfLife: ParamMoments | null;
+    kappa: ParamMoments | null;
+    r2: ParamMoments | null;
+  } | null;
   pooled: {
     naive: BookStats;
     filtered: BookStats;
@@ -481,6 +495,23 @@ function poolBooks(books: Book[], days: number): Book {
   return p;
 }
 
+function moments(xs: number[]): ParamMoments | null {
+  if (!xs.length) return null;
+  let lo = xs[0]!;
+  let hi = xs[0]!;
+  let s = 0;
+  for (const x of xs) {
+    s += x;
+    lo = Math.min(lo, x);
+    hi = Math.max(hi, x);
+  }
+  const mean = s / xs.length;
+  let v = 0;
+  for (const x of xs) v += (x - mean) ** 2;
+  const std = xs.length > 1 ? Math.sqrt(v / (xs.length - 1)) : 0;
+  return { n: xs.length, mean, std, min: lo, max: hi };
+}
+
 function invalid(
   pairId: string,
   bars: NseBar[],
@@ -500,6 +531,7 @@ function invalid(
     integrity,
     folds: [],
     selectedFolds: 0,
+    stability: null,
     pooled: null,
     lastFit: null,
     lastRegime: "mean_reverting",
@@ -527,6 +559,7 @@ export function validateOu(
   }
 
   const folds: FoldReport[] = [];
+  const foldBooks = new Map<number, { filtered: Book; naive: Book }>();
   let lastRegime: RegimeId = "mean_reverting";
   let engineN = 0;
   let lastFit: OuFit | null = null;
@@ -571,10 +604,15 @@ export function validateOu(
         naive: stats(v.naive, val.at(-1)!.a, val.at(-1)!.b, val.length),
         filtered: stats(v.filtered, val.at(-1)!.a, val.at(-1)!.b, val.length),
       };
-      const valOk =
-        (valRun.naive.maxDd < 0.25) &&
-        (valRun.naive.sharpe == null || valRun.naive.sharpe > -0.5);
-      if (!valOk) reason = "validation rejected (drawdown/sharpe)";
+      const valTrades = valRun.naive.trades + valRun.filtered.trades;
+      const valDd = Math.max(valRun.naive.maxDd, valRun.filtered.maxDd);
+      const valSharpe = Math.max(
+        valRun.naive.sharpe ?? -Infinity,
+        valRun.filtered.sharpe ?? -Infinity,
+      );
+      if (valTrades < 1) reason = "validation: no fills";
+      else if (valDd >= 0.2) reason = "validation rejected (drawdown)";
+      else if (valSharpe < -0.5) reason = "validation rejected (sharpe)";
       else {
         selected = true;
         reason = "selected";
@@ -587,8 +625,7 @@ export function validateOu(
         byRegime: sliceByRegime(o.filtered, o.naive, oos.length),
       };
       if (selected) {
-        (oosRun as { _f?: Book; _n?: Book })._f = o.filtered;
-        (oosRun as { _n?: Book })._n = o.naive;
+        foldBooks.set(folds.length, { filtered: o.filtered, naive: o.naive });
       }
     } else if (fit) {
       reason = `κ/half-life/R² fail (hl=${fit.halfLife.toFixed(1)}d r2=${fit.r2.toFixed(2)})`;
@@ -615,51 +652,52 @@ export function validateOu(
     [...selected].reverse().find((f) => f.fit)?.fit ??
     [...folds].reverse().find((f) => f.fit)?.fit ??
     null;
+
+  const tradableFits = folds.map((f) => f.fit).filter((f): f is OuFit => !!f && isTradable(f));
+  const stability = tradableFits.length
+    ? {
+        beta: moments(tradableFits.map((f) => f.beta)),
+        halfLife: moments(tradableFits.map((f) => f.halfLife)),
+        kappa: moments(tradableFits.map((f) => f.kappa)),
+        r2: moments(tradableFits.map((f) => f.r2)),
+      }
+    : null;
+
   let pooled: ValidationReport["pooled"] = null;
   if (selected.length) {
     const fBooks: Book[] = [];
     const nBooks: Book[] = [];
     const fAll = emptyBook();
     const nAll = emptyBook();
-    fAll.realized = INITIAL_EQUITY;
-    nAll.realized = INITIAL_EQUITY;
-    for (const f of selected) {
-      const extra = f.oos as { _f?: Book; _n?: Book };
-      if (extra._f && extra._n) {
-        fBooks.push(extra._f);
-        nBooks.push(extra._n);
-        fAll.pnls.push(...extra._f.pnls);
-        nAll.pnls.push(...extra._n.pnls);
-        fAll.held += extra._f.held;
-        nAll.held += extra._n.held;
-        fAll.daily.push(...extra._f.daily);
-        nAll.daily.push(...extra._n.daily);
-        fAll.dailyRegime.push(...extra._f.dailyRegime);
-        nAll.dailyRegime.push(...extra._n.dailyRegime);
-        fAll.tradeRegime.push(...extra._f.tradeRegime);
-        nAll.tradeRegime.push(...extra._n.tradeRegime);
-      }
+    for (let i = 0; i < folds.length; i++) {
+      const extra = foldBooks.get(i);
+      if (!extra) continue;
+      fBooks.push(extra.filtered);
+      nBooks.push(extra.naive);
+      fAll.pnls.push(...extra.filtered.pnls);
+      nAll.pnls.push(...extra.naive.pnls);
+      fAll.held += extra.filtered.held;
+      nAll.held += extra.naive.held;
+      fAll.dailyRegime.push(...extra.filtered.dailyRegime);
+      nAll.dailyRegime.push(...extra.naive.dailyRegime);
+      fAll.tradeRegime.push(...extra.filtered.tradeRegime);
+      nAll.tradeRegime.push(...extra.naive.tradeRegime);
     }
     const days = selected.length * OOS_BARS;
     const pf = poolBooks(fBooks, days);
     const pn = poolBooks(nBooks, days);
     const fs = stats(pf, 1, 1, days);
     const ns = stats(pn, 1, 1, days);
+    fAll.daily = pf.daily;
+    nAll.daily = pn.daily;
+    fAll.realized = pf.realized;
+    nAll.realized = pn.realized;
     pooled = {
       naive: ns,
       filtered: fs,
       edge: fs.pnl - ns.pnl,
-      byRegime: sliceByRegime(
-        { ...fAll, daily: pf.daily, realized: pf.realized },
-        { ...nAll, daily: pn.daily, realized: pn.realized },
-        days,
-      ),
+      byRegime: sliceByRegime(fAll, nAll, days),
     };
-  }
-
-  for (const f of folds) {
-    delete (f.oos as { _f?: Book })._f;
-    delete (f.oos as { _n?: Book })._n;
   }
 
   const last = bars[bars.length - 1]!;
@@ -680,6 +718,7 @@ export function validateOu(
     integrity,
     folds,
     selectedFolds: selected.length,
+    stability,
     pooled,
     lastFit,
     lastRegime,

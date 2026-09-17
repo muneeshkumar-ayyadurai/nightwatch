@@ -4,6 +4,7 @@ import { Panel, PnL } from "@/components/desk";
 import { PairChart, ZChart } from "@/components/charts";
 import { Badge } from "@/components/ui/badge";
 import {
+  holdHours,
   MAX_HOLD_HOURS,
   Z_ENTRY,
   Z_EXIT,
@@ -117,7 +118,14 @@ function StrategyPage() {
               <Row k="Entry" v={`|z| > ${Z_ENTRY.toFixed(1)}`} />
               <Row k="Exit" v={`|z| < ${Z_EXIT}`} />
               <Row k="Stop" v={`|z| > ${Z_STOP}`} />
-              <Row k="Time stop" v={`${MAX_HOLD_HOURS}h`} />
+              <Row
+                k="Time stop"
+                v={
+                  ouFit
+                    ? `${holdHours(ouFit)}h · 2× half-life`
+                    : `${MAX_HOLD_HOURS}h`
+                }
+              />
               <Row k="Hedge" v={ouFit ? `β ${ouFit.beta.toFixed(2)} log` : "unfitted"} />
               <Row
                 k="Half-life"
@@ -212,19 +220,33 @@ function fmtPct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function fmtCagr(n: number | null) {
+  return n == null ? "—" : fmtPct(n);
+}
+
 function BookCells({ b }: { b: BookStats }) {
   return (
     <>
       <td className="py-2 text-right">
         <PnL n={b.pnl} />
       </td>
+      <td className="py-2 text-right font-mono tabular-nums">{fmtCagr(b.cagr)}</td>
       <td className="py-2 text-right font-mono tabular-nums">{fmtSharpe(b.sharpe)}</td>
       <td className="py-2 text-right font-mono tabular-nums">{fmtPct(b.maxDd)}</td>
+      <td className="py-2 text-right font-mono tabular-nums">
+        {b.downsideVol == null ? "—" : fmtPct(b.downsideVol)}
+      </td>
       <td className="py-2 text-right font-mono tabular-nums">{b.trades}</td>
       <td className="py-2 text-right font-mono tabular-nums">
         {b.winRate == null ? "—" : fmtPct(b.winRate)}
       </td>
       <td className="py-2 text-right font-mono tabular-nums">{fmtPct(b.timeIn)}</td>
+      <td className="py-2 text-right font-mono tabular-nums">
+        {b.turnover.toFixed(2)}
+      </td>
+      <td className="py-2 text-right font-mono tabular-nums">
+        {b.tailLoss == null ? "—" : <PnL n={b.tailLoss} />}
+      </td>
     </>
   );
 }
@@ -287,7 +309,25 @@ function ValidationBody({ v }: { v: ValidationReport }) {
           <Row k="β" v={v.lastFit.beta.toFixed(3)} />
           <Row k="Half-life" v={`${v.lastFit.halfLife.toFixed(1)}d`} />
           <Row k="κ" v={v.lastFit.kappa.toFixed(1)} />
+          <Row k="θ" v={v.lastFit.theta.toExponential(2)} />
+          <Row k="σ" v={v.lastFit.sigma.toFixed(3)} />
           <Row k="R²" v={v.lastFit.r2.toFixed(2)} />
+          <Row
+            k="β range"
+            v={
+              v.stability?.beta
+                ? `${v.stability.beta.min.toFixed(2)}–${v.stability.beta.max.toFixed(2)}`
+                : "—"
+            }
+          />
+          <Row
+            k="hl range"
+            v={
+              v.stability?.halfLife
+                ? `${v.stability.halfLife.min.toFixed(1)}–${v.stability.halfLife.max.toFixed(1)}d`
+                : "—"
+            }
+          />
         </dl>
       ) : null}
       {v.folds.length > 0 ? (
@@ -297,6 +337,7 @@ function ValidationBody({ v }: { v: ValidationReport }) {
               <tr>
                 <th className="pb-2 font-medium">Fold</th>
                 <th className="pb-2 font-medium">Train → OOS</th>
+                <th className="pb-2 font-medium">β / hl / R²</th>
                 <th className="pb-2 font-medium">Select</th>
                 <th className="pb-2 text-right font-medium">OOS gated</th>
                 <th className="pb-2 text-right font-medium">OOS naive</th>
@@ -308,6 +349,11 @@ function ValidationBody({ v }: { v: ValidationReport }) {
                   <td className="py-2 font-mono tabular-nums">{f.i}</td>
                   <td className="py-2 text-xs text-muted-foreground">
                     {istDate(f.trainFrom)} → {istDate(f.oosTo)}
+                  </td>
+                  <td className="py-2 font-mono text-xs tabular-nums">
+                    {f.fit
+                      ? `${f.fit.beta.toFixed(2)} / ${f.fit.halfLife.toFixed(1)}d / ${f.fit.r2.toFixed(2)}`
+                      : "—"}
                   </td>
                   <td className="py-2 text-xs">
                     {f.selected ? "yes" : f.reason}
@@ -332,11 +378,15 @@ function ValidationBody({ v }: { v: ValidationReport }) {
                 <tr>
                   <th className="pb-2 font-medium">Pooled OOS</th>
                   <th className="pb-2 text-right font-medium">P&L</th>
+                  <th className="pb-2 text-right font-medium">CAGR</th>
                   <th className="pb-2 text-right font-medium">Sharpe</th>
                   <th className="pb-2 text-right font-medium">Max DD</th>
+                  <th className="pb-2 text-right font-medium">Down vol</th>
                   <th className="pb-2 text-right font-medium">Trades</th>
                   <th className="pb-2 text-right font-medium">Win</th>
                   <th className="pb-2 text-right font-medium">Time in</th>
+                  <th className="pb-2 text-right font-medium">Turnover</th>
+                  <th className="pb-2 text-right font-medium">Tail</th>
                 </tr>
               </thead>
               <tbody>
@@ -356,8 +406,11 @@ function ValidationBody({ v }: { v: ValidationReport }) {
               <thead className="text-xs text-muted-foreground">
                 <tr>
                   <th className="pb-2 font-medium">Regime (OOS)</th>
+                  <th className="pb-2 text-right font-medium">Bars</th>
                   <th className="pb-2 text-right font-medium">Gated P&L</th>
                   <th className="pb-2 text-right font-medium">Naive P&L</th>
+                  <th className="pb-2 text-right font-medium">Gated Sharpe</th>
+                  <th className="pb-2 text-right font-medium">Naive Sharpe</th>
                   <th className="pb-2 text-right font-medium">Gated n</th>
                   <th className="pb-2 text-right font-medium">Naive n</th>
                 </tr>
@@ -368,11 +421,20 @@ function ValidationBody({ v }: { v: ValidationReport }) {
                   return (
                     <tr key={id} className="border-t border-border">
                       <td className="py-2">{REGIME_META[id].label}</td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {sl.bars}
+                      </td>
                       <td className="py-2 text-right">
                         <PnL n={sl.filtered.pnl} />
                       </td>
                       <td className="py-2 text-right">
                         <PnL n={sl.naive.pnl} />
+                      </td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {fmtSharpe(sl.filtered.sharpe)}
+                      </td>
+                      <td className="py-2 text-right font-mono tabular-nums">
+                        {fmtSharpe(sl.naive.sharpe)}
                       </td>
                       <td className="py-2 text-right font-mono tabular-nums">
                         {sl.filtered.trades}

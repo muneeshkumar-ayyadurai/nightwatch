@@ -127,6 +127,14 @@ describe("validateOu walk-forward", () => {
     assert.equal(r.status, "invalid");
   });
 
+  it("INVALID when gilt ETFs are missing — no dummy curve", () => {
+    const bars = ouBars(need + 10).map((b) => ({ ...b, gilt10: null }));
+    const r = validateOu(bars, "hdfc-icici");
+    assert.equal(r.status, "invalid");
+    assert.match(r.reason, /gilt/i);
+    assert.equal(r.pooled, null);
+  });
+
   it("fits OU on train only and rolls at least one fold", () => {
     const bars = ouBars(need + 20);
     const r = validateOu(bars, "hdfc-icici");
@@ -145,6 +153,25 @@ describe("validateOu walk-forward", () => {
       prefix.folds[0]!.fit!.beta.toFixed(6),
       later.folds[0]!.fit!.beta.toFixed(6),
     );
+    if (r.folds.some((f) => f.fit && f.fit.kappa > 0 && f.fit.r2 >= 0.35)) {
+      assert.ok(r.stability?.beta && r.stability.halfLife);
+    }
+  });
+
+  it("regime attribution covers all four states when a fold is selected", () => {
+    const bars = ouBars(need + 80);
+    const r = validateOu(bars, "hdfc-icici");
+    if (r.status === "ok" && r.pooled) {
+      for (const id of ["mean_reverting", "trending", "high_vol", "crisis"] as const) {
+        assert.ok(r.pooled.byRegime[id], id);
+      }
+      assert.ok(
+        Object.values(r.pooled.byRegime).some((s) => s.bars > 0),
+        "some regime bars in OOS",
+      );
+    } else {
+      assert.ok(r.folds.length >= 1);
+    }
   });
 
   it("regime gate does not trade more than naive through a crisis OOS", () => {
